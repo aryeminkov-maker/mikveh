@@ -81,9 +81,9 @@ function useShared(key, initial) {
 }
 
 const DEFAULT_STAFF = [
-  { id: "s1", name: "רחל כהן", pin: "1234" },
-  { id: "s2", name: "מירי לוי", pin: "2580" },
-  { id: "s3", name: "שרה אזולאי", pin: "9911" },
+  { id: "s1", name: "רחל כהן", pin: "1234", phone: "", email: "" },
+  { id: "s2", name: "מירי לוי", pin: "2580", phone: "", email: "" },
+  { id: "s3", name: "שרה אזולאי", pin: "9911", phone: "", email: "" },
 ];
 
 const DEFAULT_INVENTORY = {
@@ -263,7 +263,7 @@ function WaveDivider({ color = COLORS.aqua, opacity = 0.35 }) {
 function TopBar({ route, navigate }) {
   const tabs = [
     { id: "public", label: "ממשק ציבורי", icon: Users },
-    { id: "kiosk", label: "טאבלט בלנית", icon: Droplets },
+    { id: "kiosk", label: "התחברות לבלניות", icon: Droplets },
     { id: "admin", label: "ניהול ובקרה", icon: ClipboardList },
   ];
   return (
@@ -381,12 +381,36 @@ function useSystemData(mikvehId) {
 /* ============================================================
    KIOSK APP (tablet — bulaniyot)
    ============================================================ */
+function useStaffEmailApprovals(mikvehs, email) {
+  const [approvals, setApprovals] = useState([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!email) { setApprovals([]); return; }
+    let active = true;
+    setLoading(true);
+    (async () => {
+      const results = await Promise.all(mikvehs.map(async (m) => {
+        const staff = await storage.get(`staff:${m.id}`).catch(() => null);
+        const list = staff || [];
+        const match = list.find((s) => (s.email || "").trim().toLowerCase() === email.toLowerCase());
+        return match ? { mikvehId: m.id, staffName: match.name } : null;
+      }));
+      if (active) { setApprovals(results.filter(Boolean)); setLoading(false); }
+    })();
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mikvehs, email]);
+  return [approvals, loading];
+}
+
 function KioskApp({ mikvehs }) {
   const [deviceMikvehId] = useState(pairedMikvehId());
   const [authUser, authLoading] = useAuthUser();
   const [kioskEmails] = useShared("kiosk-emails", []);
   const [chosenMikvehId, setChosenMikvehId] = useState("");
   const [entryMode, setEntryMode] = useState(null); // null | "tablet-info" | "google"
+  const approvalEmail = (authUser && !authUser.isAnonymous) ? authUser.email : null;
+  const [staffApprovals, staffLoading] = useStaffEmailApprovals(mikvehs, approvalEmail);
 
   const deviceMikveh = mikvehs.find((m) => m.id === deviceMikvehId);
 
@@ -412,8 +436,11 @@ function KioskApp({ mikvehs }) {
   // --- Path B: personal phone — requires Google sign-in + an approved email ---
   if (authLoading) return <CenteredLoading text="בודק התחברות…" />;
   if (!authUser || authUser.isAnonymous) return <KioskGoogleGate onBack={() => setEntryMode(null)} />;
+  if (staffLoading) return <CenteredLoading text="בודקת הרשאות…" />;
 
-  const myApprovals = kioskEmails.filter((e) => e.email.trim().toLowerCase() === authUser.email.toLowerCase());
+  const guestApprovals = kioskEmails.filter((e) => e.email.trim().toLowerCase() === authUser.email.toLowerCase())
+    .map((e) => ({ mikvehId: e.mikvehId, staffName: e.staffName }));
+  const myApprovals = [...staffApprovals, ...guestApprovals];
   if (myApprovals.length === 0) return <KioskNotApproved email={authUser.email} />;
 
   const activeChoice = chosenMikvehId
@@ -1101,6 +1128,7 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
   const tabs = [
     { id: "overview", label: "סקירת מקוואות", icon: Building2 },
     { id: "dashboard", label: "דשבורד", icon: TrendingUp },
+    { id: "staff", label: "ניהול בלניות", icon: Users },
     { id: "attendance", label: "נוכחות וסידור", icon: CalendarCheck },
     { id: "water", label: "איכות מים", icon: Thermometer },
     { id: "finance", label: "דוחות כספיים", icon: FileSpreadsheet },
@@ -1142,6 +1170,7 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
       {tab === "overview" && <AdminOverviewAllMikvehs mikvehs={mikvehs} onSelect={(id) => { setMikvehId(id); setTab("dashboard"); }} />}
       {needsMikveh && !mikveh && <Empty text="אין עדיין מקוואות במערכת — יש להוסיף מקווה בלשונית 'ניהול מקוואות'." />}
       {tab === "dashboard" && mikveh && <AdminDashboard data={data} />}
+      {tab === "staff" && mikveh && <AdminStaff data={data} mikveh={mikveh} />}
       {tab === "attendance" && mikveh && <AdminAttendance data={data} />}
       {tab === "water" && mikveh && <AdminWater data={data} />}
       {tab === "finance" && mikveh && <AdminFinance data={data} />}
@@ -1257,10 +1286,7 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
   const todayChecklist = data.checklist[today];
   const isOpenNow = !!(todayChecklist && todayChecklist.opened && !todayChecklist.closed);
 
-  const actualStaffToday = data.loginLog.find((l) => l.ts.slice(0, 10) === today);
-  const defaultStaffId = data.defaultSchedule[weekday];
-  const defaultStaffName = defaultStaffId ? ((data.staff.find((s) => s.id === defaultStaffId) || {}).name) : null;
-  const tonightName = actualStaffToday ? actualStaffToday.staffName : defaultStaffName;
+  const { names: tonightNames, isActual: tonightIsActual } = tonightStaff(data, weekday, today);
 
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
 
@@ -1278,9 +1304,6 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
     mikvehsCtl.updateMikveh(mikveh.id, { photos: (mikveh.photos || []).filter((_, i) => i !== idx) });
   };
 
-  const setScheduleDay = (dayIdx, staffId) => {
-    data.setDefaultSchedule((prev) => ({ ...prev, [dayIdx]: staffId || null }));
-  };
   const setHourDay = (dayIdx, value) => {
     const next = hours.map((d, i) => i === dayIdx ? { ...d, hours: value } : d);
     mikvehsCtl.updateMikveh(mikveh.id, { hours: next });
@@ -1322,8 +1345,8 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
             <div style={{ fontSize: 10, color: "#7a8f8d" }}>שעות היום</div>
           </div>
           <div style={{ textAlign: "center", minWidth: 70 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700 }}>{tonightName || "לא שובצה"}</div>
-            <div style={{ fontSize: 10, color: "#7a8f8d" }}>בלנית הערב{!actualStaffToday && tonightName ? " (משובצת)" : ""}</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>{tonightNames.length ? tonightNames.join(", ") : "לא שובצה"}</div>
+            <div style={{ fontSize: 10, color: "#7a8f8d" }}>בלנית הערב{!tonightIsActual && tonightNames.length ? " (משובצת)" : ""}</div>
           </div>
           <a href={mapsUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5, textDecoration: "none" }}>
             <Navigation size={13} /> ניווט
@@ -1397,27 +1420,7 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
             </div>
           </div>
 
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 2 }}>שיבוץ ברירת מחדל — מי הבלנית בכל יום</div>
-            <p style={{ fontSize: 11.5, color: "#7a8f8d", marginTop: 0, marginBottom: 8 }}>משמש כברירת מחדל לתצוגה כל עוד לא נרשמה כניסה בפועל של בלנית באותו יום.</p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 8 }}>
-              {WEEKDAYS_HE.map((day, i) => (
-                <div key={i}>
-                  <div style={{ fontSize: 11.5, fontWeight: 700, marginBottom: 3 }}>{day}</div>
-                  <select style={inputStyle} value={data.defaultSchedule[i] || ""} onChange={(e) => setScheduleDay(i, e.target.value)}>
-                    <option value="">ללא שיבוץ</option>
-                    {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 8 }}>קביעת תורים באתר הציבורי</div>
-            <ToggleRow label="הצג טופס קביעת תור לתושבות" checked={!!mikveh.bookingEnabled} onChange={(v) => mikvehsCtl.updateMikveh(mikveh.id, { bookingEnabled: v })} />
-            <p style={{ fontSize: 11, color: "#7a8f8d", marginTop: 6 }}>בשלב זה הטופס אינו מחובר בפועל לתשלום או ליומן אמיתי — זו הדמיית תכונה בלבד.</p>
-          </div>
+          <p style={{ fontSize: 11.5, color: "#7a8f8d", margin: 0 }}>ניהול צוות הבלניות ושיבוץ נוכחות עברו ללשונית "ניהול בלניות".</p>
 
           <div style={{ background: COLORS.seafoam, borderRadius: 11, padding: 12 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><Tablet size={13} /> קישור להתקנת טאבלט קבוע במקווה זה</div>
@@ -1440,8 +1443,6 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
 }
 
 function AdminPermissions({ adminEmails, setAdminEmails, mikvehs, authUser }) {
-  const [kioskEmails, setKioskEmails] = useShared("kiosk-emails", []);
-
   const [newAdminEmail, setNewAdminEmail] = useState("");
   const [newAdminName, setNewAdminName] = useState("");
   const addAdmin = () => {
@@ -1454,45 +1455,18 @@ function AdminPermissions({ adminEmails, setAdminEmails, mikvehs, authUser }) {
     setAdminEmails((prev) => prev.filter((a) => a.email !== email));
   };
 
-  const [newKioskEmail, setNewKioskEmail] = useState("");
-  const [newKioskName, setNewKioskName] = useState("");
-  const [newKioskMikveh, setNewKioskMikveh] = useState(mikvehs[0]?.id || "");
-  const addKiosk = () => {
-    if (!newKioskEmail.trim() || !newKioskName.trim() || !newKioskMikveh) return;
-    setKioskEmails((prev) => [...prev, { email: newKioskEmail.trim().toLowerCase(), staffName: newKioskName.trim(), mikvehId: newKioskMikveh, addedAt: new Date().toISOString() }]);
-    setNewKioskEmail(""); setNewKioskName("");
-  };
-  const removeKiosk = (idx) => setKioskEmails((prev) => prev.filter((_, i) => i !== idx));
-
   return (
-    <>
-      <Card title="מנהלי מערכת — כניסה ל'ניהול ובקרה'" icon={ShieldCheck}>
-        <p style={{ fontSize: 13, color: "#3a5250", marginTop: 0 }}>רק כתובות Google ברשימה הזו יוכלו להתחבר לממשק הניהול.</p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 16 }}>
-          <input placeholder="שם" style={inputStyle} value={newAdminName} onChange={(e) => setNewAdminName(e.target.value)} />
-          <input placeholder="[email protected]" style={inputStyle} value={newAdminEmail} onChange={(e) => setNewAdminEmail(e.target.value)} />
-          <button style={btnPrimary} onClick={addAdmin}><Plus size={15} /> הוספה</button>
-        </div>
-        <Table headers={["שם", "אימייל", ""]}
-          rows={adminEmails.map((a) => [a.name, a.email, a.email === authUser.email.toLowerCase() ? <span key="me" style={{ fontSize: 11.5, color: "#7a8f8d" }}>את/ה</span> : <button key="x" onClick={() => removeAdmin(a.email)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5, color: COLORS.red }}><Trash2 size={12} /></button>])}
-          empty="אין מנהלים מוגדרים." />
-      </Card>
-
-      <Card title="בלניות מאושרות — כניסה מהטלפון האישי" icon={Smartphone}>
-        <p style={{ fontSize: 13, color: "#3a5250", marginTop: 0 }}>מיפוי בין חשבון Google, שם הבלנית והמקווה שלה. כניסה מטלפון אישי (שאינו טאבלט מותקן) תעבוד רק לכתובות שברשימה זו.</p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 16 }}>
-          <input placeholder="שם הבלנית" style={inputStyle} value={newKioskName} onChange={(e) => setNewKioskName(e.target.value)} />
-          <input placeholder="[email protected]" style={inputStyle} value={newKioskEmail} onChange={(e) => setNewKioskEmail(e.target.value)} />
-          <select style={inputStyle} value={newKioskMikveh} onChange={(e) => setNewKioskMikveh(e.target.value)}>
-            {mikvehs.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-          <button style={btnPrimary} onClick={addKiosk}><Plus size={15} /> הוספה</button>
-        </div>
-        <Table headers={["בלנית", "אימייל", "מקווה", ""]}
-          rows={kioskEmails.map((k, i) => [k.staffName, k.email, (mikvehs.find((m) => m.id === k.mikvehId) || {}).name || "—", <button key="x" onClick={() => removeKiosk(i)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5, color: COLORS.red }}><Trash2 size={12} /></button>])}
-          empty="אין בלניות מאושרות לכניסה מהטלפון." />
-      </Card>
-    </>
+    <Card title="מנהלי מערכת — כניסה ל'ניהול ובקרה'" icon={ShieldCheck}>
+      <p style={{ fontSize: 13, color: "#3a5250", marginTop: 0 }}>רק כתובות Google ברשימה הזו יוכלו להתחבר לממשק הניהול. (הרשאות כניסה לבלניות עברו ללשונית "ניהול בלניות" של כל מקווה.)</p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 16 }}>
+        <input placeholder="שם" style={inputStyle} value={newAdminName} onChange={(e) => setNewAdminName(e.target.value)} />
+        <input placeholder="[email protected]" style={inputStyle} value={newAdminEmail} onChange={(e) => setNewAdminEmail(e.target.value)} />
+        <button style={btnPrimary} onClick={addAdmin}><Plus size={15} /> הוספה</button>
+      </div>
+      <Table headers={["שם", "אימייל", ""]}
+        rows={adminEmails.map((a) => [a.name, a.email, a.email === authUser.email.toLowerCase() ? <span key="me" style={{ fontSize: 11.5, color: "#7a8f8d" }}>את/ה</span> : <button key="x" onClick={() => removeAdmin(a.email)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5, color: COLORS.red }}><Trash2 size={12} /></button>])}
+        empty="אין מנהלים מוגדרים." />
+    </Card>
   );
 }
 
@@ -1564,14 +1538,153 @@ function AdminDashboard({ data }) {
   );
 }
 
+function AdminStaff({ data, mikveh }) {
+  const [kioskEmails, setKioskEmails] = useShared("kiosk-emails", []);
+  const guestList = kioskEmails.filter((e) => e.mikvehId === mikveh.id);
+
+  const [editing, setEditing] = useState(null); // staff id currently being edited, or "new"
+  const emptyDraft = { name: "", phone: "", email: "", pin: "" };
+  const [draft, setDraft] = useState(emptyDraft);
+
+  const startEdit = (s) => { setEditing(s.id); setDraft({ name: s.name, phone: s.phone || "", email: s.email || "", pin: s.pin || "" }); };
+  const startNew = () => { setEditing("new"); setDraft(emptyDraft); };
+  const cancelEdit = () => { setEditing(null); setDraft(emptyDraft); };
+
+  const saveEdit = () => {
+    if (!draft.name.trim() || !/^\d{4}$/.test(draft.pin)) return;
+    if (editing === "new") {
+      data.setStaff((prev) => [...prev, { id: uid(), name: draft.name.trim(), phone: draft.phone.trim(), email: draft.email.trim().toLowerCase(), pin: draft.pin }]);
+    } else {
+      data.setStaff((prev) => prev.map((s) => s.id === editing ? { ...s, name: draft.name.trim(), phone: draft.phone.trim(), email: draft.email.trim().toLowerCase(), pin: draft.pin } : s));
+    }
+    cancelEdit();
+  };
+  const removeStaff = (id) => {
+    if (window.confirm("להסיר את הבלנית מהצוות? זה גם יבטל את שיבוצה בסידור הנוכחות.")) {
+      data.setStaff((prev) => prev.filter((s) => s.id !== id));
+    }
+  };
+
+  const [guestName, setGuestName] = useState("");
+  const [guestEmail, setGuestEmail] = useState("");
+  const addGuest = () => {
+    if (!guestName.trim() || !guestEmail.trim()) return;
+    setKioskEmails((prev) => [...prev, { email: guestEmail.trim().toLowerCase(), staffName: guestName.trim(), mikvehId: mikveh.id, addedAt: new Date().toISOString() }]);
+    setGuestName(""); setGuestEmail("");
+  };
+  const removeGuest = (email) => setKioskEmails((prev) => prev.filter((e) => !(e.mikvehId === mikveh.id && e.email === email)));
+
+  return (
+    <>
+      <Card title="צוות בלניות" icon={Users} right={!editing && <button style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5 }} onClick={startNew}><Plus size={14} /> בלנית חדשה</button>}>
+        <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
+          כתובת המייל (אם הוזנה) מאשרת אוטומטית כניסה מהטלפון האישי עם אותו חשבון Google, כבלנית הזו.
+        </p>
+        {editing && (
+          <div style={{ background: COLORS.seafoam, borderRadius: 12, padding: 14, marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 10 }}>
+              <Field label="שם"><input style={inputStyle} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
+              <Field label="טלפון"><input style={inputStyle} value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></Field>
+              <Field label="אימייל (Google)"><input style={inputStyle} value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} placeholder="[email protected]" /></Field>
+              <Field label="קוד אישי (4 ספרות, לכניסה בטאבלט)"><input style={inputStyle} value={draft.pin} maxLength={4} inputMode="numeric" onChange={(e) => setDraft({ ...draft, pin: e.target.value.replace(/\D/g, "") })} /></Field>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button style={btnPrimary} onClick={saveEdit}><Check size={15} /> שמירה</button>
+              <button style={btnGhost} onClick={cancelEdit}>ביטול</button>
+            </div>
+          </div>
+        )}
+        <Table headers={["שם", "טלפון", "אימייל", "קוד", ""]}
+          rows={data.staff.map((s) => [s.name, s.phone || "—", s.email || "—", s.pin, (
+            <div key="actions" style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => startEdit(s)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5 }}>עריכה</button>
+              <button onClick={() => removeStaff(s.id)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5, color: COLORS.red }}><Trash2 size={12} /></button>
+            </div>
+          )])}
+          empty="אין עדיין בלניות בצוות." />
+      </Card>
+
+      <Card title="הרשאות כניסה נוספות" icon={KeyRound}>
+        <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
+          למי שאינה חלק קבוע מהצוות (למשל מחליפה חד-פעמית) — מאשר כניסה מהטלפון האישי בלי להוסיף אותה לצוות הקבוע.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 14 }}>
+          <input placeholder="שם" style={inputStyle} value={guestName} onChange={(e) => setGuestName(e.target.value)} />
+          <input placeholder="[email protected]" style={inputStyle} value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} />
+          <button style={btnPrimary} onClick={addGuest}><Plus size={15} /> הוספה</button>
+        </div>
+        <Table headers={["שם", "אימייל", ""]}
+          rows={guestList.map((g) => [g.staffName, g.email, <button key="x" onClick={() => removeGuest(g.email)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5, color: COLORS.red }}><Trash2 size={12} /></button>])}
+          empty="אין הרשאות נוספות." />
+      </Card>
+    </>
+  );
+}
+
 function AdminAttendance({ data }) {
   const recent = data.loginLog.slice(0, 15);
+
+  const [dayForm, setDayForm] = useState({}); // per-weekday draft: { staffId, start, end }
+  const updateDraft = (day, patch) => setDayForm((prev) => ({ ...prev, [day]: { ...(prev[day] || { staffId: "", start: "20:00", end: "22:00" }), ...patch } }));
+
+  const addShift = (day) => {
+    const draft = dayForm[day];
+    if (!draft || !draft.staffId) return;
+    data.setDefaultSchedule((prev) => ({ ...prev, [day]: [...scheduleShifts(prev, day), { staffId: draft.staffId, start: draft.start || "", end: draft.end || "" }] }));
+    setDayForm((prev) => ({ ...prev, [day]: { staffId: "", start: "20:00", end: "22:00" } }));
+  };
+  const removeShift = (day, idx) => {
+    data.setDefaultSchedule((prev) => ({ ...prev, [day]: scheduleShifts(prev, day).filter((_, i) => i !== idx) }));
+  };
+
   return (
-    <Card title="נוכחות וכניסות למשמרת" icon={CalendarCheck}>
-      <Table headers={["בלנית", "תאריך", "שעה"]}
-        rows={recent.map((l) => [l.staffName, fmtDate(l.ts), fmtDateTime(l.ts).split(" ")[1]])}
-        empty="עדיין אין רישומי כניסה — יתעדכן כשבלנית תתחבר בטאבלט." />
-    </Card>
+    <>
+      <Card title="שיבוץ נוכחות שבועי" icon={CalendarCheck}>
+        <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
+          אפשר לשבץ כמה בלניות לאותו ערב, עם חלוקת שעות ביניהן. השיבוץ משמש כברירת מחדל להצגה — כניסה בפועל בטאבלט תמיד גוברת עליו.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {WEEKDAYS_HE.map((day, i) => {
+            const shifts = scheduleShifts(data.defaultSchedule, i);
+            const draft = dayForm[i] || { staffId: "", start: "20:00", end: "22:00" };
+            return (
+              <div key={i} style={{ borderTop: i === 0 ? "none" : "1px solid #00000010", paddingTop: i === 0 ? 0 : 12 }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 8 }}>{day}</div>
+                {shifts.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                    {shifts.map((s, idx) => {
+                      const st = data.staff.find((x) => x.id === s.staffId);
+                      return (
+                        <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.seafoam, borderRadius: 9, padding: "7px 11px" }}>
+                          <span style={{ fontSize: 13 }}>{st ? st.name : "בלנית לא ידועה"}{s.start && <span style={{ color: "#7a8f8d" }}> · {s.start}–{s.end || "?"}</span>}</span>
+                          <button onClick={() => removeShift(i, idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={14} /></button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <select style={{ ...inputStyle, width: "auto", minWidth: 140 }} value={draft.staffId} onChange={(e) => updateDraft(i, { staffId: e.target.value })}>
+                    <option value="">בחירת בלנית…</option>
+                    {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                  <input type="time" style={{ ...inputStyle, width: "auto" }} value={draft.start} onChange={(e) => updateDraft(i, { start: e.target.value })} />
+                  <span style={{ fontSize: 13 }}>–</span>
+                  <input type="time" style={{ ...inputStyle, width: "auto" }} value={draft.end} onChange={(e) => updateDraft(i, { end: e.target.value })} />
+                  <button style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5 }} onClick={() => addShift(i)}><Plus size={13} /> הוספת שיבוץ</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card title="נוכחות וכניסות בפועל" icon={CalendarCheck}>
+        <Table headers={["בלנית", "תאריך", "שעה"]}
+          rows={recent.map((l) => [l.staffName, fmtDate(l.ts), fmtDateTime(l.ts).split(" ")[1]])}
+          empty="עדיין אין רישומי כניסה — יתעדכן כשבלנית תתחבר בטאבלט." />
+      </Card>
+    </>
   );
 }
 
@@ -1735,6 +1848,25 @@ function PublicApp({ mikvehs }) {
   );
 }
 
+function scheduleShifts(defaultSchedule, weekday) {
+  const v = defaultSchedule[weekday];
+  if (!v) return [];
+  if (Array.isArray(v)) return v;
+  return [{ staffId: v, start: "", end: "" }]; // backward-compat: older version stored a single staff id per day
+}
+
+function tonightStaff(data, weekday, today) {
+  const actual = data.loginLog.filter((l) => l.ts.slice(0, 10) === today);
+  if (actual.length) return { names: actual.map((l) => l.staffName), isActual: true };
+  const shifts = scheduleShifts(data.defaultSchedule, weekday);
+  const names = shifts.map((s) => {
+    const st = data.staff.find((x) => x.id === s.staffId);
+    if (!st) return null;
+    return s.start ? `${st.name} (${s.start}–${s.end || "?"})` : st.name;
+  }).filter(Boolean);
+  return { names, isActual: false };
+}
+
 function PublicMikvehDetail({ mikveh }) {
   const data = useSystemData(mikveh.id);
   const today = todayStr();
@@ -1742,15 +1874,14 @@ function PublicMikvehDetail({ mikveh }) {
   const hours = mikveh.hours || OPENING_HOURS;
   const todaysHours = (hours[weekday] || {}).hours || "לא הוגדר";
   const isOpenDay = todaysHours !== "סגור";
+  const [expanded, setExpanded] = useState(false);
 
-  const actualStaffToday = data.loginLog.find((l) => l.ts.slice(0, 10) === today);
-  const defaultStaffId = data.defaultSchedule[weekday];
-  const defaultStaffName = defaultStaffId ? ((data.staff.find((s) => s.id === defaultStaffId) || {}).name) : null;
-  const tonightName = actualStaffToday ? actualStaffToday.staffName : defaultStaffName;
+  const { names: tonightNames } = tonightStaff(data, weekday, today);
+  const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
 
   return (
     <>
-      <div style={{ background: `linear-gradient(135deg, ${COLORS.teal}, ${COLORS.aqua})`, borderRadius: 20, padding: 26, color: "#fff", marginBottom: 20, position: "relative", overflow: "hidden" }}>
+      <div style={{ background: `linear-gradient(135deg, ${COLORS.teal}, ${COLORS.aqua})`, borderRadius: 20, padding: 26, color: "#fff", marginBottom: 16, position: "relative", overflow: "hidden" }}>
         {mikveh.photoUrl && (
           <img src={mikveh.photoUrl} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.32 }}
             onError={(e) => { e.currentTarget.style.display = "none"; }} />
@@ -1764,16 +1895,22 @@ function PublicMikvehDetail({ mikveh }) {
             <span style={{ fontWeight: 700, fontSize: 14 }}>{isOpenDay ? "פתוח היום" : "סגור היום"}</span>
           </div>
           <h1 className="font-display" style={{ margin: "0 0 6px", fontSize: 26 }}>{mikveh.name} — {WEEKDAYS_HE[weekday]}</h1>
-          <p style={{ margin: 0, opacity: 0.95, fontSize: 15 }}>שעות היום: <b>{todaysHours}</b>{tonightName && <> · בלנית במשמרת: <b>{tonightName}</b></>}</p>
+          <p style={{ margin: 0, opacity: 0.95, fontSize: 15 }}>שעות היום: <b>{todaysHours}</b>{tonightNames.length > 0 && <> · בלנית הערב: <b>{tonightNames.join(", ")}</b></>}</p>
           <p style={{ marginTop: 4, opacity: 0.9, fontSize: 13 }}>{mikveh.address}{mikveh.phone && <> · {mikveh.phone}</>}</p>
-          <p style={{ marginTop: 8, fontSize: 12.5, opacity: 0.85 }}>שעות השבוע הצמודות לשקיעה/צאת הכוכבים מחושבות אוטומטית באתר הסופי; כאן מוצגות שעות לדוגמה.</p>
+          <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+            <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ ...btnGold, textDecoration: "none" }}><Navigation size={15} /> ניווט למקווה</a>
+            <button onClick={() => setExpanded((x) => !x)} style={{ ...btnBase("#ffffff22", "#fff") }}>
+              {expanded ? "הסתרת פרטים" : "עוד פרטים"} <ChevronRight size={14} style={{ transform: expanded ? "rotate(90deg)" : "rotate(-90deg)", transition: "transform .15s" }} />
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="two-col">
+      {expanded && (
         <div>
           <Card title="שעות פתיחה שבועיות" icon={Clock}>
             <Table headers={["יום", "שעות"]} rows={hours.map((d) => [d.day, d.hours])} empty="" />
+            <p style={{ fontSize: 12, color: "#7a8f8d", marginTop: 10, marginBottom: 0 }}>שעות השבוע הצמודות לשקיעה/צאת הכוכבים מחושבות אוטומטית באתר הסופי; כאן מוצגות שעות לדוגמה.</p>
           </Card>
           {(mikveh.photos || []).length > 0 && (
             <Card title="תמונות מהמקווה" icon={Image}>
@@ -1803,41 +1940,7 @@ function PublicMikvehDetail({ mikveh }) {
             </div>
           </Card>
         </div>
-        {mikveh.bookingEnabled ? <PublicBooking data={data} /> : (
-          <Card title="קביעת תור" icon={CalendarCheck}>
-            <p style={{ fontSize: 13.5, color: "#7a8f8d", margin: 0 }}>קביעת תורים מקוונת אינה זמינה כרגע במקווה זה. ניתן ליצור קשר טלפוני{mikveh.phone ? <> ({mikveh.phone})</> : ""}.</p>
-          </Card>
-        )}
-      </div>
+      )}
     </>
-  );
-}
-
-function PublicBooking({ data }) {
-  const [form, setForm] = useState({ name: "", phone: "", date: todayStr(), time: "21:00" });
-  const [done, setDone] = useState(false);
-
-  const submit = () => {
-    if (!form.name || !form.phone) return;
-    data.setAppointments((prev) => [{ id: uid(), ...form, ts: new Date().toISOString() }, ...prev]);
-    setDone(true);
-    setTimeout(() => setDone(false), 3200);
-    setForm({ name: "", phone: "", date: todayStr(), time: "21:00" });
-  };
-
-  return (
-    <Card title="קביעת תור" icon={CalendarCheck}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <Field label="שם מלא"><input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-        <Field label="טלפון"><input style={inputStyle} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} inputMode="tel" /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <Field label="תאריך"><input type="date" style={inputStyle} value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
-          <Field label="שעה"><input type="time" style={inputStyle} value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} /></Field>
-        </div>
-        <button style={btnPrimary} onClick={submit}><CalendarCheck size={16} /> קביעת תור</button>
-        <button style={{ ...btnGhost, justifyContent: "center" }}><PhoneCall size={15} /> מעבר לתשלום באתר המועצה</button>
-        {done && <div style={{ background: COLORS.aquaLight, color: COLORS.teal, padding: 11, borderRadius: 10, fontSize: 13.5, fontWeight: 600, textAlign: "center" }}>התור נקבע בהצלחה! ✓</div>}
-      </div>
-    </Card>
   );
 }
