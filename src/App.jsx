@@ -104,7 +104,7 @@ const OPENING_HOURS = [
 ];
 
 const DEFAULT_MIKVEHS = [
-  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", accessible: true, bookingEnabled: false, photoUrl: "", photos: [], hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
+  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
 ];
 
 /* ============================================================
@@ -145,7 +145,7 @@ function useMikvehs() {
   const [list, setList] = useShared("mikvehs", DEFAULT_MIKVEHS);
 
   const addMikveh = useCallback((name, address) => {
-    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, bookingEnabled: false, photoUrl: "", photos: [], hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
+    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
   }, [setList]);
 
   const updateMikveh = useCallback((id, patch) => {
@@ -407,6 +407,7 @@ function KioskApp({ mikvehs }) {
   const [deviceMikvehId] = useState(pairedMikvehId());
   const [authUser, authLoading] = useAuthUser();
   const [kioskEmails] = useShared("kiosk-emails", []);
+  const [adminEmails] = useShared("admin-emails", []);
   const [chosenMikvehId, setChosenMikvehId] = useState("");
   const [entryMode, setEntryMode] = useState(null); // null | "tablet-info" | "google"
   const approvalEmail = (authUser && !authUser.isAnonymous) ? authUser.email : null;
@@ -428,7 +429,7 @@ function KioskApp({ mikvehs }) {
   if (entryMode === null) return <KioskEntryChoice onChooseTablet={() => setEntryMode("tablet-info")} onChooseGoogle={() => setEntryMode("google")} />;
   if (entryMode === "tablet-info") {
     return (
-      <SetupMessage title="חיבור טאבלט קבוע" text='חיבור מכשיר כטאבלט קבוע נעשה על ידי המנהל/ת: בממשק "ניהול ובקרה" ← "ניהול מקוואות" יש קישור ייעודי לכל מקווה. יש לפתוח את הקישור הזה פעם אחת בדפדפן של הטאבלט הפיזי שיישאר קבוע במקווה, ומשם הכניסה תהיה תמיד ישירה עם שם וקוד אישי.'
+      <SetupMessage title="חיבור טאבלט קבוע" text='חיבור מכשיר כטאבלט קבוע נעשה על ידי המנהל/ת: בממשק "ניהול ובקרה" ← "מקוואות" יש קישור ייעודי לכל מקווה. יש לפתוח את הקישור הזה פעם אחת בדפדפן של הטאבלט הפיזי שיישאר קבוע במקווה, ומשם הכניסה תהיה תמיד ישירה עם שם וקוד אישי.'
         action={<button style={btnGhost} onClick={() => setEntryMode(null)}><ArrowRight size={15} /> חזרה</button>} />
     );
   }
@@ -440,7 +441,11 @@ function KioskApp({ mikvehs }) {
 
   const guestApprovals = kioskEmails.filter((e) => e.email.trim().toLowerCase() === authUser.email.toLowerCase())
     .map((e) => ({ mikvehId: e.mikvehId, staffName: e.staffName }));
-  const myApprovals = [...staffApprovals, ...guestApprovals];
+  const isAdmin = adminEmails.some((a) => a.email.toLowerCase() === authUser.email.toLowerCase());
+  const adminApprovals = isAdmin ? mikvehs.map((m) => ({ mikvehId: m.id, staffName: authUser.displayName || authUser.email })) : [];
+  const approvalsByMikveh = new Map();
+  [...staffApprovals, ...guestApprovals, ...adminApprovals].forEach((a) => { if (!approvalsByMikveh.has(a.mikvehId)) approvalsByMikveh.set(a.mikvehId, a); });
+  const myApprovals = Array.from(approvalsByMikveh.values());
   if (myApprovals.length === 0) return <KioskNotApproved email={authUser.email} />;
 
   const activeChoice = chosenMikvehId
@@ -1116,7 +1121,7 @@ function AdminNotApproved({ email }) {
 function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
   const mikvehs = mikvehsCtl.list;
   const [mikvehId, setMikvehId] = useState(mikvehs[0]?.id || "");
-  const [tab, setTab] = useState(mikvehs.length ? "overview" : "mikvehs");
+  const [tab, setTab] = useState("mikvehs");
 
   useEffect(() => {
     if (!mikvehs.find((m) => m.id === mikvehId) && mikvehs[0]) setMikvehId(mikvehs[0].id);
@@ -1126,7 +1131,7 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
   const data = useSystemData(mikvehId);
 
   const tabs = [
-    { id: "overview", label: "סקירת מקוואות", icon: Building2 },
+    { id: "mikvehs", label: "מקוואות", icon: Building2 },
     { id: "dashboard", label: "דשבורד", icon: TrendingUp },
     { id: "staff", label: "ניהול בלניות", icon: Users },
     { id: "attendance", label: "נוכחות וסידור", icon: CalendarCheck },
@@ -1134,10 +1139,9 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
     { id: "finance", label: "דוחות כספיים", icon: FileSpreadsheet },
     { id: "audit", label: "יומן שינויים", icon: History },
     { id: "tickets", label: "קריאות תפעול", icon: Wrench },
-    { id: "mikvehs", label: "ניהול מקוואות", icon: MapPin },
     { id: "permissions", label: "הרשאות", icon: ShieldCheck },
   ];
-  const needsMikveh = !["overview", "mikvehs", "permissions"].includes(tab);
+  const needsMikveh = !["mikvehs", "permissions"].includes(tab);
 
   return (
     <div style={{ paddingTop: 18 }}>
@@ -1167,8 +1171,8 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
         </div>
       )}
 
-      {tab === "overview" && <AdminOverviewAllMikvehs mikvehs={mikvehs} onSelect={(id) => { setMikvehId(id); setTab("dashboard"); }} />}
-      {needsMikveh && !mikveh && <Empty text="אין עדיין מקוואות במערכת — יש להוסיף מקווה בלשונית 'ניהול מקוואות'." />}
+      {tab === "mikvehs" && <AdminMikvehs mikvehsCtl={mikvehsCtl} />}
+      {needsMikveh && !mikveh && <Empty text="אין עדיין מקוואות במערכת — יש להוסיף מקווה בלשונית 'מקוואות'." />}
       {tab === "dashboard" && mikveh && <AdminDashboard data={data} />}
       {tab === "staff" && mikveh && <AdminStaff data={data} mikveh={mikveh} />}
       {tab === "attendance" && mikveh && <AdminAttendance data={data} />}
@@ -1176,7 +1180,6 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
       {tab === "finance" && mikveh && <AdminFinance data={data} />}
       {tab === "audit" && mikveh && <AdminAudit data={data} />}
       {tab === "tickets" && mikveh && <AdminTickets data={data} />}
-      {tab === "mikvehs" && <AdminMikvehs mikvehsCtl={mikvehsCtl} />}
       {tab === "permissions" && <AdminPermissions adminEmails={adminEmails} setAdminEmails={setAdminEmails} mikvehs={mikvehs} authUser={authUser} />}
     </div>
   );
@@ -1187,60 +1190,6 @@ function StatMini({ label, value, warn }) {
     <div style={{ textAlign: "center" }}>
       <div style={{ fontSize: 17, fontWeight: 800, color: warn ? COLORS.red : COLORS.ink }}>{value}</div>
       <div style={{ fontSize: 10.5, color: "#7a8f8d" }}>{label}</div>
-    </div>
-  );
-}
-
-function AdminOverviewAllMikvehs({ mikvehs, onSelect }) {
-  const [rows, setRows] = useState(null);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      const today = todayStr();
-      const results = await Promise.all(mikvehs.map(async (m) => {
-        const [checklist, dippers, malfunctions, inventory] = await Promise.all([
-          storage.get(`checklist-by-date:${m.id}`).catch(() => null),
-          storage.get(`dippers-log:${m.id}`).catch(() => null),
-          storage.get(`malfunctions:${m.id}`).catch(() => null),
-          storage.get(`inventory:${m.id}`).catch(() => null),
-        ]);
-        const todayChecklist = checklist ? checklist[today] : null;
-        const todayDippers = (dippers || []).filter((d) => d.date === today).reduce((s, d) => s + d.count, 0);
-        const openTickets = (malfunctions || []).filter((t) => t.status !== "טופל").length;
-        const lowStock = inventory ? Object.values(inventory).filter((i) => i.qty <= i.threshold).length : 0;
-        return { mikveh: m, opened: !!(todayChecklist && todayChecklist.opened), closed: !!(todayChecklist && todayChecklist.closed), todayDippers, openTickets, lowStock };
-      }));
-      if (active) setRows(results);
-    })();
-    return () => { active = false; };
-  }, [mikvehs]);
-
-  if (mikvehs.length === 0) return <Empty text="אין עדיין מקוואות — הוסיפי מקווה בלשונית 'ניהול מקוואות'." />;
-  if (rows === null) return <CenteredLoading text="טוענת נתוני מקוואות…" />;
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 14 }}>
-      {rows.map((r) => (
-        <button key={r.mikveh.id} onClick={() => onSelect(r.mikveh.id)} style={{
-          textAlign: "right", background: COLORS.paper, border: `1px solid ${COLORS.aqua}22`, borderRadius: 16, padding: 18, cursor: "pointer",
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-            <div>
-              <div className="font-display" style={{ fontWeight: 700, fontSize: 16 }}>{r.mikveh.name}</div>
-              <div style={{ fontSize: 12, color: "#7a8f8d" }}>{r.mikveh.address}</div>
-            </div>
-            <span style={{ fontSize: 11.5, fontWeight: 700, padding: "3px 9px", borderRadius: 8, background: r.closed ? "#eee" : r.opened ? COLORS.aquaLight : COLORS.redLight, color: r.closed ? "#777" : r.opened ? COLORS.teal : COLORS.red }}>
-              {r.closed ? "נסגר" : r.opened ? "פתוח" : "טרם נפתח"}
-            </span>
-          </div>
-          <div style={{ display: "flex", gap: 16, marginTop: 14, paddingTop: 14, borderTop: "1px solid #00000010" }}>
-            <StatMini label="טובלות היום" value={r.todayDippers} />
-            <StatMini label="קריאות פתוחות" value={r.openTickets} warn={r.openTickets > 0} />
-            <StatMini label="מלאי נמוך" value={r.lowStock} warn={r.lowStock > 0} />
-          </div>
-        </button>
-      ))}
     </div>
   );
 }
@@ -1288,6 +1237,10 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
 
   const { names: tonightNames, isActual: tonightIsActual } = tonightStaff(data, weekday, today);
 
+  const todayDippers = data.dippersLog.filter((d) => d.date === today).reduce((s, d) => s + d.count, 0);
+  const openTickets = data.malfunctions.filter((m) => m.status !== "טופל").length;
+  const lowStock = Object.values(data.inventory).filter((i) => i.qty <= i.threshold).length;
+
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
 
   const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "" });
@@ -1302,6 +1255,16 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
   };
   const removePhoto = (idx) => {
     mikvehsCtl.updateMikveh(mikveh.id, { photos: (mikveh.photos || []).filter((_, i) => i !== idx) });
+  };
+
+  const [newAmenity, setNewAmenity] = useState("");
+  const addAmenity = () => {
+    if (!newAmenity.trim()) return;
+    mikvehsCtl.updateMikveh(mikveh.id, { amenities: [...(mikveh.amenities || []), newAmenity.trim()] });
+    setNewAmenity("");
+  };
+  const removeAmenity = (idx) => {
+    mikvehsCtl.updateMikveh(mikveh.id, { amenities: (mikveh.amenities || []).filter((_, i) => i !== idx) });
   };
 
   const setHourDay = (dayIdx, value) => {
@@ -1348,6 +1311,11 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
             <div style={{ fontSize: 12.5, fontWeight: 700 }}>{tonightNames.length ? tonightNames.join(", ") : "לא שובצה"}</div>
             <div style={{ fontSize: 10, color: "#7a8f8d" }}>בלנית הערב{!tonightIsActual && tonightNames.length ? " (משובצת)" : ""}</div>
           </div>
+          <div style={{ display: "flex", gap: 14 }}>
+            <StatMini label="טובלות היום" value={todayDippers} />
+            <StatMini label="קריאות פתוחות" value={openTickets} warn={openTickets > 0} />
+            <StatMini label="מלאי נמוך" value={lowStock} warn={lowStock > 0} />
+          </div>
           <a href={mapsUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5, textDecoration: "none" }}>
             <Navigation size={13} /> ניווט
           </a>
@@ -1382,6 +1350,25 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
               <div style={{ flex: 1, minWidth: 220 }}>
                 <ToggleRow label="נגישות לנכים (מעלון)" checked={!!mikveh.accessible} onChange={(v) => mikvehsCtl.updateMikveh(mikveh.id, { accessible: v })} />
               </div>
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 2 }}>נגישות ופרטים נוספים (מוצג לתושבות בעמוד הציבורי)</div>
+            <p style={{ fontSize: 11.5, color: "#7a8f8d", marginTop: 0, marginBottom: 8 }}>את/ה קובעת בדיוק אילו שורות יופיעו שם — למשל "חניה נגישה", "ערכות בלנית למכירה" וכו'.</p>
+            {(mikveh.amenities || []).length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                {mikveh.amenities.map((a, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.seafoam, borderRadius: 9, padding: "7px 11px" }}>
+                    <span style={{ fontSize: 13 }}>{a}</span>
+                    <button onClick={() => removeAmenity(i)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <input style={{ ...inputStyle, flex: 1 }} value={newAmenity} onChange={(e) => setNewAmenity(e.target.value)} placeholder="לדוגמה: חניה נגישה בסמוך לכניסה" onKeyDown={(e) => e.key === "Enter" && addAmenity()} />
+              <button style={{ ...btnGhost, flexShrink: 0 }} onClick={addAmenity}><Plus size={15} /> הוספה</button>
             </div>
           </div>
 
@@ -1821,29 +1808,13 @@ function Table({ headers, rows, empty }) {
    PUBLIC APP (residents)
    ============================================================ */
 function PublicApp({ mikvehs }) {
-  const [mikvehId, setMikvehId] = useState(mikvehs[0]?.id || "");
-  useEffect(() => {
-    if (!mikvehs.find((m) => m.id === mikvehId) && mikvehs[0]) setMikvehId(mikvehs[0].id);
-  }, [mikvehs, mikvehId]);
-  const mikveh = mikvehs.find((m) => m.id === mikvehId);
-
   if (mikvehs.length === 0) {
     return <div style={{ paddingTop: 40 }}><Empty text="אין כרגע מקוואות פעילים במערכת." /></div>;
   }
 
   return (
-    <div style={{ paddingTop: 18 }}>
-      {mikvehs.length > 1 && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-          {mikvehs.map((m) => (
-            <button key={m.id} onClick={() => setMikvehId(m.id)} style={{
-              padding: "9px 16px", borderRadius: 11, border: `1.5px solid ${m.id === mikvehId ? COLORS.teal : "#00000018"}`,
-              background: m.id === mikvehId ? COLORS.aquaLight : "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13.5,
-            }}>{m.name}</button>
-          ))}
-        </div>
-      )}
-      {mikveh && <PublicMikvehDetail mikveh={mikveh} />}
+    <div style={{ paddingTop: 18, display: "flex", flexDirection: "column", gap: 28 }}>
+      {mikvehs.map((m) => <PublicMikvehDetail key={m.id} mikveh={m} />)}
     </div>
   );
 }
@@ -1894,8 +1865,8 @@ function PublicMikvehDetail({ mikveh }) {
             <span style={{ width: 10, height: 10, borderRadius: "50%", background: isOpenDay ? "#8CE0B0" : "#EFA6A0" }} />
             <span style={{ fontWeight: 700, fontSize: 14 }}>{isOpenDay ? "פתוח היום" : "סגור היום"}</span>
           </div>
-          <h1 className="font-display" style={{ margin: "0 0 6px", fontSize: 26 }}>{mikveh.name} — {WEEKDAYS_HE[weekday]}</h1>
-          <p style={{ margin: 0, opacity: 0.95, fontSize: 15 }}>שעות היום: <b>{todaysHours}</b>{tonightNames.length > 0 && <> · בלנית הערב: <b>{tonightNames.join(", ")}</b></>}</p>
+          <h1 className="font-display" style={{ margin: "0 0 6px", fontSize: 26 }}>{mikveh.name}</h1>
+          <p style={{ margin: 0, opacity: 0.95, fontSize: 15 }}>שעות פתיחה היום ({WEEKDAYS_HE[weekday]}): <b>{todaysHours}</b>{tonightNames.length > 0 && <> · בלנית הערב: <b>{tonightNames.join(", ")}</b></>}</p>
           <p style={{ marginTop: 4, opacity: 0.9, fontSize: 13 }}>{mikveh.address}{mikveh.phone && <> · {mikveh.phone}</>}</p>
           <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
             <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ ...btnGold, textDecoration: "none" }}><Navigation size={15} /> ניווט למקווה</a>
@@ -1927,18 +1898,20 @@ function PublicMikvehDetail({ mikveh }) {
               <p style={{ fontSize: 14, lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap" }}>{mikveh.notes}</p>
             </Card>
           )}
-          <Card title="נגישות ומוצרים במקום" icon={Accessibility}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {[
-                mikveh.accessible ? "מעלון נגיש לבעלות מוגבלות" : null,
-                "חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה",
-              ].filter(Boolean).map((f) => (
-                <div key={f} style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <Check size={16} color={COLORS.aqua} /><span style={{ fontSize: 14 }}>{f}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
+          {(mikveh.accessible || (mikveh.amenities || []).length > 0) && (
+            <Card title="נגישות ומוצרים במקום" icon={Accessibility}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {[
+                  mikveh.accessible ? "מעלון נגיש לבעלות מוגבלות" : null,
+                  ...(mikveh.amenities || []),
+                ].filter(Boolean).map((f, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <Check size={16} color={COLORS.aqua} /><span style={{ fontSize: 14 }}>{f}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
         </div>
       )}
     </>
