@@ -4,14 +4,14 @@
 // (already-parsed) JSON payload. This mirrors the shared, key/value
 // storage the app was originally written against, so App.jsx barely
 // had to change.
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps } from "firebase/app";
 import {
   getFirestore, doc, getDoc, setDoc, deleteDoc,
   collection, getDocs, query, where, orderBy, documentId,
 } from "firebase/firestore";
 import { firebaseConfig } from "./firebaseConfig";
 
-const app = initializeApp(firebaseConfig);
+const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const COLLECTION = "app_data";
 

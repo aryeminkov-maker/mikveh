@@ -1,26 +1,24 @@
 rules_version = '2';
 
-// ⚠️ IMPORTANT — read before you go live.
-// This starter opens the "app_data" collection to anyone with your Firebase
-// config (which is not secret, and ends up visible in your deployed site's
-// JS bundle). That's fine for local testing, but this app stores real cash
-// totals, phone numbers and staff activity — do NOT leave it this open once
-// real people are using it.
+// This app now uses Firebase Authentication (Google sign-in) for both the
+// admin console and the "personal phone" kiosk path. The rule below requires
+// *some* signed-in Google account to read/write — which email addresses are
+// actually allowed to see the admin screens or act as a specific mikveh's
+// staff is enforced inside the app itself (see the "הרשאות" tab), against
+// the admin-emails / kiosk-emails lists.
 //
-// Minimum recommended next step: turn on Firebase Authentication (e.g. email
-// links or phone auth for staff), then replace the rule below with:
-//
-//   match /app_data/{docId} {
-//     allow read, write: if request.auth != null;
-//   }
-//
-// For finer control you could also split kiosk-writable keys from
-// admin-only keys (e.g. audit-log should probably not be deletable by staff).
+// This is a reasonable first line of defense (random internet visitors with
+// no Google account are blocked entirely), but it is NOT equivalent to
+// server-side allowlist enforcement — anyone with a Google account could in
+// principle still write directly to Firestore, bypassing the app's UI. For
+// stronger protection later, look into Firebase custom claims + rules that
+// check request.auth.token against the admin-emails/kiosk-emails documents.
 
 service cloud.firestore {
   match /databases/{database}/documents {
     match /app_data/{docId} {
-      allow read, write: if true; // TODO: replace before production use
+      allow read, write: if request.auth != null;
     }
   }
 }
+

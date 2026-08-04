@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { storage } from "./storage";
+import { signInWithGoogle, signOutUser, subscribeAuth, ensureAnonymousAuth } from "./auth";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend
@@ -9,7 +10,8 @@ import {
   AlertTriangle, Mic, Plus, Minus, ChevronRight, LogOut, Check, X,
   ClipboardList, LineChart as LineChartIcon, FileSpreadsheet, History,
   PhoneCall, Clock, MapPin, Accessibility, CalendarCheck, ShieldAlert,
-  Thermometer, TrendingUp, Download, RefreshCw
+  Thermometer, TrendingUp, Download, RefreshCw, Building2, ShieldCheck,
+  Link2, Copy, Tablet, Smartphone, Settings, Trash2, KeyRound, Loader2
 } from "lucide-react";
 
 /* ============================================================
@@ -100,24 +102,129 @@ const OPENING_HOURS = [
   { day: "שבת", hours: "צאת השבת–00:00" },
 ];
 
+const DEFAULT_MIKVEHS = [
+  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", setupToken: uid() },
+];
+
 /* ============================================================
-   ROOT APP
+   AUTH — thin React hook around the Google sign-in in auth.js
    ============================================================ */
+function useAuthUser() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const unsub = subscribeAuth((u) => { setUser(u); setLoading(false); });
+    return unsub;
+  }, []);
+  return [user, loading];
+}
+
+// Runs once at app start: if nobody is signed in yet, falls back to an
+// anonymous session so public visitors and installed kiosk tablets (neither
+// of which use Google sign-in) can still read/write under firestore.rules.
+function useEnsureBaselineAuth() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const unsub = subscribeAuth((u) => {
+      if (u) { if (!cancelled) setReady(true); return; }
+      ensureAnonymousAuth().catch(() => { if (!cancelled) setReady(true); });
+      // if anonymous sign-in succeeds, onAuthStateChanged fires again with a user
+    });
+    return () => { cancelled = true; unsub(); };
+  }, []);
+  return ready;
+}
+
+/* ============================================================
+   MIKVEHS — the list of physical mikvehs this council runs.
+   Stored under one shared key (not mikveh-specific).
+   ============================================================ */
+function useMikvehs() {
+  const [list, setList] = useShared("mikvehs", DEFAULT_MIKVEHS);
+
+  const addMikveh = useCallback((name, address) => {
+    setList((prev) => [...prev, { id: uid(), name, address, setupToken: uid() }]);
+  }, [setList]);
+
+  const updateMikveh = useCallback((id, patch) => {
+    setList((prev) => prev.map((m) => m.id === id ? { ...m, ...patch } : m));
+  }, [setList]);
+
+  const removeMikveh = useCallback((id) => {
+    setList((prev) => prev.filter((m) => m.id !== id));
+  }, [setList]);
+
+  const regenerateToken = useCallback((id) => {
+    setList((prev) => prev.map((m) => m.id === id ? { ...m, setupToken: uid() } : m));
+  }, [setList]);
+
+  return { list, addMikveh, updateMikveh, removeMikveh, regenerateToken };
+}
+
+const DEVICE_KEY = "mikveh-kiosk-device-id";
+function pairedMikvehId() {
+  try { return localStorage.getItem(DEVICE_KEY) || ""; } catch (e) { return ""; }
+}
+function pairDevice(mikvehId) {
+  try { localStorage.setItem(DEVICE_KEY, mikvehId); } catch (e) { /* ignore */ }
+}
+function unpairDevice() {
+  try { localStorage.removeItem(DEVICE_KEY); } catch (e) { /* ignore */ }
+}
+
+
+function useHashRoute() {
+  const parse = () => window.location.hash.replace(/^#\/?/, "") || "public";
+  const [route, setRoute] = useState(parse());
+  useEffect(() => {
+    const onChange = () => setRoute(parse());
+    window.addEventListener("hashchange", onChange);
+    return () => window.removeEventListener("hashchange", onChange);
+  }, []);
+  const navigate = (r) => { window.location.hash = "/" + r; };
+  return [route, navigate];
+}
+
 export default function MikvehSystem() {
-  const [role, setRole] = useState("select"); // select | kiosk | admin | public
+  const [route, navigate] = useHashRoute();
+  const authReady = useEnsureBaselineAuth();
+  const mikvehs = useMikvehs();
+
+  if (!authReady) {
+    return (
+      <div dir="rtl" style={{ background: COLORS.seafoam, minHeight: "100%", fontFamily: "'Assistant', sans-serif", color: COLORS.ink }}>
+        <FontLoader />
+        <CenteredLoading text="טוענת…" />
+      </div>
+    );
+  }
+
+  // one-time tablet pairing link: #/kiosk-setup/{mikvehId}/{token}
+  if (route.startsWith("kiosk-setup/")) {
+    return (
+      <div dir="rtl" style={{ background: COLORS.seafoam, minHeight: "100%", fontFamily: "'Assistant', sans-serif", color: COLORS.ink }}>
+        <FontLoader />
+        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "18px 16px 48px" }}>
+          <KioskSetupHandler route={route} mikvehs={mikvehs} navigate={navigate} />
+        </div>
+      </div>
+    );
+  }
+
+  const topRoute = route === "public" ? "public" : route === "admin" ? "admin" : "kiosk";
 
   return (
     <div dir="rtl" style={{ background: COLORS.seafoam, minHeight: "100%", fontFamily: "'Assistant', sans-serif", color: COLORS.ink }}>
       <FontLoader />
-      <TopBar role={role} setRole={setRole} />
+      <TopBar route={topRoute} navigate={navigate} />
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 16px 48px" }}>
-        {role === "select" && <RoleSelect setRole={setRole} />}
-        {role === "kiosk" && <KioskApp />}
-        {role === "admin" && <AdminApp />}
-        {role === "public" && <PublicApp />}
+        {topRoute === "kiosk" && <KioskApp mikvehs={mikvehs.list} />}
+        {topRoute === "admin" && <AdminApp mikvehsCtl={mikvehs} />}
+        {topRoute === "public" && <PublicApp mikvehs={mikvehs.list} />}
       </div>
       <footer style={{ textAlign: "center", padding: "18px 8px", fontSize: 12.5, color: COLORS.teal, opacity: 0.65 }}>
-        שלד מערכת לדוגמה · הנתונים משותפים בין כל מי שפותח את המסמך הזה
+        רשת המקוואות · הנתונים משותפים בין כל מי שפותח את המסמך הזה
       </footer>
     </div>
   );
@@ -145,16 +252,16 @@ function WaveDivider({ color = COLORS.aqua, opacity = 0.35 }) {
   );
 }
 
-function TopBar({ role, setRole }) {
+function TopBar({ route, navigate }) {
   const tabs = [
+    { id: "public", label: "ממשק ציבורי", icon: Users },
     { id: "kiosk", label: "טאבלט בלנית", icon: Droplets },
     { id: "admin", label: "ניהול ובקרה", icon: ClipboardList },
-    { id: "public", label: "ממשק ציבורי", icon: Users },
   ];
   return (
     <div style={{ background: COLORS.teal }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "14px 16px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <button onClick={() => setRole("select")} style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer" }}>
+        <button onClick={() => navigate("public")} style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer" }}>
           <div style={{ width: 34, height: 34, borderRadius: 9, background: COLORS.gold, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Droplets size={19} color={COLORS.ink} />
           </div>
@@ -163,9 +270,9 @@ function TopBar({ role, setRole }) {
         <div style={{ display: "flex", gap: 4, background: "#ffffff17", padding: 4, borderRadius: 12 }}>
           {tabs.map((t) => {
             const Icon = t.icon;
-            const active = role === t.id;
+            const active = route === t.id;
             return (
-              <button key={t.id} onClick={() => setRole(t.id)}
+              <button key={t.id} onClick={() => navigate(t.id)}
                 style={{
                   display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 9,
                   border: "none", cursor: "pointer", fontSize: 14.5, fontWeight: 600,
@@ -187,58 +294,61 @@ function TopBar({ role, setRole }) {
   );
 }
 
-function RoleSelect({ setRole }) {
-  const cards = [
-    { id: "kiosk", title: "טאבלט בלנית", desc: "כניסה עם קוד אישי, צ׳ק-ליסט משמרת, טובלות ותשלומים, מלאי, פתקים, תקלות וכפתור חירום.", icon: Droplets, color: COLORS.aqua },
-    { id: "admin", title: "ניהול ובקרה", desc: "דשבורד עומסים, נוכחות, איכות מים, דוחות כספיים, יומן שינויים וקריאות תפעול.", icon: ClipboardList, color: COLORS.teal },
-    { id: "public", title: "ממשק ציבורי", desc: "שעות פתיחה, בלנית במשמרת, קביעת תור ופרטי נגישות עבור תושבות.", icon: Users, color: COLORS.gold },
-  ];
+/* ============================================================
+   TABLET PAIRING — visiting a link the admin generated (from the
+   "מקוואות" admin tab) permanently locks this browser/device into
+   kiosk mode for one specific mikveh (staff-list + PIN login, no
+   Google account needed — this is the "installed on a dedicated
+   tablet" path from the spec).
+   ============================================================ */
+function KioskSetupHandler({ route, mikvehs, navigate }) {
+  const parts = route.split("/"); // ["kiosk-setup", mikvehId, token]
+  const mikvehId = parts[1];
+  const token = parts[2];
+  const mikveh = mikvehs.list.find((m) => m.id === mikvehId);
+  const [done, setDone] = useState(false);
+
+  if (!mikveh) return <SetupMessage bad title="קישור לא תקין" text="המקווה המבוקש לא נמצא. יש לבקש קישור חדש מהמנהל/ת." />;
+  if (mikveh.setupToken !== token) return <SetupMessage bad title="קישור פג תוקף" text="הקישור הזה כבר לא בתוקף (יתכן שהופק קישור חדש). יש לבקש קישור עדכני מהמנהל/ת." />;
+
+  if (done) return <SetupMessage title="ההתקנה הושלמה ✓" text={`המכשיר הזה מקושר כעת קבוע ל${mikveh.name}. אפשר לסגור את הדף הזה ולפתוח את האתר מחדש — הוא ייכנס ישירות למצב הטאבלט.`}
+    action={<button style={btnPrimary} onClick={() => navigate("kiosk")}>מעבר למסך הבלנית</button>} />;
+
   return (
-    <div style={{ padding: "40px 4px" }}>
-      <h1 className="font-display" style={{ fontSize: 30, margin: "0 0 6px" }}>מערכת ניהול רשת מקוואות</h1>
-      <p style={{ color: COLORS.teal, fontSize: 15.5, marginBottom: 28, maxWidth: 620 }}>
-        שלד עבודה אחד ל-3 הממשקים — הם חולקים אותו מאגר נתונים, כך שדיווח שנרשם בטאבלט מופיע מיידית אצל המנהל/ת ובפורטל הציבורי.
-      </p>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px,1fr))", gap: 16 }}>
-        {cards.map((c) => {
-          const Icon = c.icon;
-          return (
-            <button key={c.id} onClick={() => setRole(c.id)} style={{
-              textAlign: "right", background: COLORS.paper, border: `1px solid ${c.color}33`, borderRadius: 16,
-              padding: 22, cursor: "pointer", boxShadow: "0 1px 2px #00000010", transition: "transform .15s",
-            }}
-              onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-2px)"}
-              onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}>
-              <div style={{ width: 42, height: 42, borderRadius: 11, background: `${c.color}22`, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>
-                <Icon size={22} color={c.color} />
-              </div>
-              <div className="font-display" style={{ fontWeight: 700, fontSize: 17.5, marginBottom: 6 }}>{c.title}</div>
-              <div style={{ fontSize: 14, color: "#3a5250", lineHeight: 1.6 }}>{c.desc}</div>
-              <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 4, color: c.color, fontWeight: 600, fontSize: 13.5 }}>
-                כניסה <ChevronRight size={15} style={{ transform: "scaleX(-1)" }} />
-              </div>
-            </button>
-          );
-        })}
+    <SetupMessage title="חיבור מכשיר זה כטאבלט קבוע" text={`את עומדת לקבוע שהמכשיר הזה (${navigator.userAgent.includes("Mobi") ? "טלפון/טאבלט" : "מחשב"} זה) ישמש כטאבלט קבוע עבור "${mikveh.name}". מעכשיו האתר ייפתח ישירות במסך כניסת בלניות (שם + קוד אישי), בלי חשבון Google. פעולה זו מיועדת למכשיר שנשאר קבוע במקווה.`}
+      action={<button style={btnPrimary} onClick={() => { pairDevice(mikveh.id); setDone(true); }}><Tablet size={16} /> אישור וחיבור המכשיר</button>} />
+  );
+}
+
+function SetupMessage({ title, text, action, bad }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "center", paddingTop: 40 }}>
+      <div style={{ width: "100%", maxWidth: 440, background: COLORS.paper, borderRadius: 20, padding: 28, border: `1px solid ${bad ? COLORS.red : COLORS.aqua}33`, textAlign: "center" }}>
+        {bad ? <AlertTriangle size={28} color={COLORS.red} style={{ marginBottom: 10 }} /> : <Tablet size={28} color={COLORS.aqua} style={{ marginBottom: 10 }} />}
+        <h2 className="font-display" style={{ margin: "0 0 8px" }}>{title}</h2>
+        <p style={{ color: "#3a5250", fontSize: 14, lineHeight: 1.7, marginBottom: 18 }}>{text}</p>
+        {action}
       </div>
     </div>
   );
 }
 
+
 /* ============================================================
    SHARED DATA HOOKS (single source used by all three apps)
    ============================================================ */
-function useSystemData() {
-  const [staff, setStaff, staffLoaded] = useShared("staff", DEFAULT_STAFF);
-  const [checklist, setChecklist] = useShared("checklist-by-date", {});
-  const [dippersLog, setDippersLog] = useShared("dippers-log", []);
-  const [inventory, setInventory] = useShared("inventory", DEFAULT_INVENTORY);
-  const [notes, setNotes] = useShared("handover-notes", []);
-  const [malfunctions, setMalfunctions] = useShared("malfunctions", []);
-  const [emergencyAlerts, setEmergencyAlerts] = useShared("emergency-alerts", []);
-  const [auditLog, setAuditLog] = useShared("audit-log", []);
-  const [loginLog, setLoginLog] = useShared("login-log", []);
-  const [appointments, setAppointments] = useShared("appointments", []);
+function useSystemData(mikvehId) {
+  const k = (base) => `${base}:${mikvehId || "unassigned"}`;
+  const [staff, setStaff, staffLoaded] = useShared(k("staff"), DEFAULT_STAFF);
+  const [checklist, setChecklist] = useShared(k("checklist-by-date"), {});
+  const [dippersLog, setDippersLog] = useShared(k("dippers-log"), []);
+  const [inventory, setInventory] = useShared(k("inventory"), DEFAULT_INVENTORY);
+  const [notes, setNotes] = useShared(k("handover-notes"), []);
+  const [malfunctions, setMalfunctions] = useShared(k("malfunctions"), []);
+  const [emergencyAlerts, setEmergencyAlerts] = useShared(k("emergency-alerts"), []);
+  const [auditLog, setAuditLog] = useShared(k("audit-log"), []);
+  const [loginLog, setLoginLog] = useShared(k("login-log"), []);
+  const [appointments, setAppointments] = useShared(k("appointments"), []);
 
   const addAudit = useCallback((staffName, action, details) => {
     setAuditLog((prev) => [{ id: uid(), ts: new Date().toISOString(), staffName, action, details }, ...prev].slice(0, 500));
@@ -261,9 +371,111 @@ function useSystemData() {
 /* ============================================================
    KIOSK APP (tablet — bulaniyot)
    ============================================================ */
-function KioskApp() {
-  const data = useSystemData();
-  const [current, setCurrent] = useState(null); // logged-in staff object
+function KioskApp({ mikvehs }) {
+  const [deviceMikvehId] = useState(pairedMikvehId());
+  const [authUser, authLoading] = useAuthUser();
+  const [kioskEmails] = useShared("kiosk-emails", []);
+  const [chosenMikvehId, setChosenMikvehId] = useState("");
+
+  const deviceMikveh = mikvehs.find((m) => m.id === deviceMikvehId);
+
+  // --- Path A: this device was permanently paired to one mikveh (tablet) ---
+  if (deviceMikveh) {
+    return <KioskShell mikveh={deviceMikveh} presetStaffName={null} personalPhone={false}
+      onLeaveDevice={() => { unpairDevice(); window.location.reload(); }} />;
+  }
+  if (deviceMikvehId && !deviceMikveh) {
+    return <SetupMessage bad title="המקווה של המכשיר הזה נמחק" text="המנהל/ת הסירה את המקווה שהמכשיר הזה היה משויך אליו. אפשר לנתק את השיוך ולהתחבר מחדש."
+      action={<button style={btnGhost} onClick={() => { unpairDevice(); window.location.reload(); }}>ניתוק המכשיר</button>} />;
+  }
+
+  // --- Path B: personal phone — requires Google sign-in + an approved email ---
+  if (authLoading) return <CenteredLoading text="בודק התחברות…" />;
+  if (!authUser || authUser.isAnonymous) return <KioskGoogleGate />;
+
+  const myApprovals = kioskEmails.filter((e) => e.email.trim().toLowerCase() === authUser.email.toLowerCase());
+  if (myApprovals.length === 0) return <KioskNotApproved email={authUser.email} />;
+
+  const activeChoice = chosenMikvehId
+    ? myApprovals.find((a) => a.mikvehId === chosenMikvehId)
+    : (myApprovals.length === 1 ? myApprovals[0] : null);
+
+  if (!activeChoice) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", paddingTop: 40 }}>
+        <div style={{ width: "100%", maxWidth: 420, background: COLORS.paper, borderRadius: 20, padding: 26, border: `1px solid ${COLORS.aqua}22`, textAlign: "center" }}>
+          <Smartphone size={26} color={COLORS.aqua} style={{ marginBottom: 8 }} />
+          <h2 className="font-display" style={{ margin: "0 0 4px" }}>לאיזה מקווה?</h2>
+          <p style={{ color: COLORS.teal, fontSize: 13.5, marginBottom: 16 }}>מחוברת ליותר ממקווה אחד — בחרי עבור איזה מהם לרשום עכשיו.</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {myApprovals.map((a) => {
+              const m = mikvehs.find((mm) => mm.id === a.mikvehId);
+              return (
+                <button key={a.mikvehId} onClick={() => setChosenMikvehId(a.mikvehId)} style={{ ...btnGhost, justifyContent: "space-between" }}>
+                  <span>{m ? m.name : a.mikvehId}</span><ChevronRight size={15} style={{ transform: "scaleX(-1)" }} />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const mikveh = mikvehs.find((m) => m.id === activeChoice.mikvehId);
+  if (!mikveh) return <SetupMessage bad title="המקווה לא נמצא" text="ייתכן שהמקווה שאושרת עבורו הוסר. יש לפנות למנהל/ת." />;
+
+  return <KioskShell mikveh={mikveh} presetStaffName={activeChoice.staffName} personalPhone={true}
+    onLeaveDevice={() => signOutUser()} />;
+}
+
+function CenteredLoading({ text }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "80px 0", gap: 10, color: COLORS.teal }}>
+      <Loader2 size={26} className="spin" style={{ animation: "spin 1s linear infinite" }} />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <span style={{ fontSize: 14 }}>{text}</span>
+    </div>
+  );
+}
+
+function KioskGoogleGate() {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const go = async () => {
+    setBusy(true); setErr("");
+    try { await signInWithGoogle(); }
+    catch (e) { setErr("ההתחברות נכשלה. נסי שוב."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div style={{ display: "flex", justifyContent: "center", paddingTop: 40 }}>
+      <div style={{ width: "100%", maxWidth: 400, background: COLORS.paper, borderRadius: 20, padding: 28, border: `1px solid ${COLORS.aqua}22`, textAlign: "center" }}>
+        <Smartphone size={28} color={COLORS.aqua} style={{ marginBottom: 10 }} />
+        <h2 className="font-display" style={{ margin: "0 0 6px" }}>כניסת בלנית מהטלפון האישי</h2>
+        <p style={{ color: "#3a5250", fontSize: 13.5, marginBottom: 18, lineHeight: 1.6 }}>
+          מכשיר זה אינו טאבלט מותקן במקווה — יש להתחבר עם חשבון Google המאושר על ידי המנהל/ת.
+        </p>
+        <button style={{ ...btnPrimary, margin: "0 auto" }} onClick={go} disabled={busy}>
+          {busy ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <KeyRound size={16} />}
+          {busy ? "מתחברת…" : "התחברות עם Google"}
+        </button>
+        {err && <div style={{ color: COLORS.red, fontSize: 13, marginTop: 10 }}>{err}</div>}
+      </div>
+    </div>
+  );
+}
+
+function KioskNotApproved({ email }) {
+  return (
+    <SetupMessage bad title="החשבון עדיין לא מאושר" text={`החשבון ${email} לא נמצא ברשימת הבלניות המאושרות. יש לבקש מהמנהל/ת להוסיף את הכתובת הזו במסך "הרשאות" בממשק הניהול.`}
+      action={<button style={btnGhost} onClick={() => signOutUser()}><LogOut size={15} /> החלפת חשבון</button>} />
+  );
+}
+
+function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
+  const data = useSystemData(mikveh.id);
+  const [current, setCurrent] = useState(null);
   const [tab, setTab] = useState("checklist");
   const [toast, setToast] = useState(null);
 
@@ -275,13 +487,25 @@ function KioskApp() {
     data.addAudit(staffMember.name, "כניסה למשמרת", "התחברות לטאבלט הבלנית");
   };
 
+  // personal-phone flow: Google already verified identity — log in immediately as the mapped staff name
+  useEffect(() => {
+    if (personalPhone && presetStaffName && !current) {
+      handleLogin({ id: "google:" + presetStaffName, name: presetStaffName });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personalPhone, presetStaffName]);
+
   const handleLogout = () => {
     if (current) data.addAudit(current.name, "יציאה ממשמרת", "החלפת בלנית");
     setCurrent(null);
     setTab("checklist");
+    if (personalPhone) onLeaveDevice(); // signs out of Google entirely
   };
 
-  if (!current) return <KioskLogin staff={data.staff} onLogin={handleLogin} />;
+  if (!current) {
+    if (personalPhone) return <CenteredLoading text="מתחברת…" />;
+    return <KioskLogin staff={data.staff} onLogin={handleLogin} mikveh={mikveh} onLeaveDevice={onLeaveDevice} />;
+  }
 
   const kioskTabs = [
     { id: "checklist", label: "פתיחה/סגירה", icon: ClipboardList },
@@ -294,18 +518,18 @@ function KioskApp() {
   return (
     <div style={{ paddingTop: 18, position: "relative" }}>
       {/* status bar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.paper, borderRadius: 14, padding: "12px 16px", marginBottom: 14, border: `1px solid ${COLORS.aqua}22` }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.paper, borderRadius: 14, padding: "12px 16px", marginBottom: 14, border: `1px solid ${COLORS.aqua}22`, flexWrap: "wrap", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 38, height: 38, borderRadius: "50%", background: COLORS.aquaLight, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: COLORS.teal }}>
             {current.name.slice(0, 1)}
           </div>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 15.5 }}>{current.name}</div>
+            <div style={{ fontWeight: 700, fontSize: 15.5 }}>{current.name} <span style={{ fontWeight: 500, fontSize: 12, color: COLORS.teal }}>· {mikveh.name}</span></div>
             <div style={{ fontSize: 12.5, color: COLORS.teal }}>{fmtDate(todayStr())} · {weekdayOf(todayStr())} · {nowTime()}</div>
           </div>
         </div>
         <button onClick={handleLogout} style={btnGhost}>
-          <LogOut size={15} /> החלף בלנית
+          <LogOut size={15} /> {personalPhone ? "התנתקות" : "החלף בלנית"}
         </button>
       </div>
 
@@ -371,7 +595,7 @@ function Card({ title, icon: Icon, children, right }) {
   );
 }
 
-function KioskLogin({ staff, onLogin }) {
+function KioskLogin({ staff, onLogin, mikveh, onLeaveDevice }) {
   const [selected, setSelected] = useState(null);
   const [pin, setPin] = useState("");
   const [err, setErr] = useState("");
@@ -392,7 +616,8 @@ function KioskLogin({ staff, onLogin }) {
       <div style={{ width: "100%", maxWidth: 420, background: COLORS.paper, borderRadius: 20, padding: 28, border: `1px solid ${COLORS.aqua}22`, textAlign: "center" }}>
         <Droplets size={30} color={COLORS.aqua} style={{ marginBottom: 8 }} />
         <h2 className="font-display" style={{ margin: "0 0 4px" }}>כניסה למשמרת</h2>
-        <p style={{ color: COLORS.teal, fontSize: 13.5, marginBottom: 18 }}>מצב כיוסק · בחרי שם והזיני קוד אישי בן 4 ספרות</p>
+        <p style={{ color: COLORS.teal, fontSize: 13.5, marginBottom: 4 }}>{mikveh.name}</p>
+        <p style={{ color: "#7a8f8d", fontSize: 12.5, marginBottom: 18 }}>מצב כיוסק · בחרי שם והזיני קוד אישי בן 4 ספרות</p>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", marginBottom: 20 }}>
           {staff.map((s) => (
@@ -420,6 +645,9 @@ function KioskLogin({ staff, onLogin }) {
           ))}
         </div>
         {!selected && <div style={{ marginTop: 14, fontSize: 12.5, color: COLORS.teal }}>לדוגמה בלבד: הקודים הם 1234 / 2580 / 9911</div>}
+        <button onClick={onLeaveDevice} style={{ marginTop: 18, background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#9ab0ad", display: "flex", alignItems: "center", gap: 4, margin: "18px auto 0" }}>
+          <Settings size={12} /> ניתוק המכשיר ממקווה זה
+        </button>
       </div>
     </div>
   );
@@ -743,20 +971,97 @@ function Empty({ text }) {
 /* ============================================================
    ADMIN APP (department manager / treasury)
    ============================================================ */
-function AdminApp() {
-  const data = useSystemData();
-  const [tab, setTab] = useState("dashboard");
+function AdminApp({ mikvehsCtl }) {
+  const [authUser, authLoading] = useAuthUser();
+  const [adminEmails, setAdminEmails, adminEmailsLoaded] = useShared("admin-emails", []);
+  const bootstrappedRef = useRef(false);
+
+  // Bootstrap: nobody is an approved admin yet → the first person to sign in
+  // becomes the first admin automatically, so the system isn't locked forever.
+  useEffect(() => {
+    if (authUser && !authUser.isAnonymous && adminEmailsLoaded && adminEmails.length === 0 && !bootstrappedRef.current) {
+      bootstrappedRef.current = true;
+      setAdminEmails([{ email: authUser.email.toLowerCase(), name: authUser.displayName || authUser.email, addedAt: new Date().toISOString() }]);
+    }
+  }, [authUser, adminEmailsLoaded, adminEmails, setAdminEmails]);
+
+  if (authLoading || !adminEmailsLoaded) return <CenteredLoading text="בודק התחברות…" />;
+  if (!authUser || authUser.isAnonymous) return <AdminGoogleGate />;
+
+  const isApproved = adminEmails.some((a) => a.email.toLowerCase() === authUser.email.toLowerCase());
+  if (!isApproved) {
+    if (adminEmails.length === 0) return <CenteredLoading text="מגדירה הרשאות ראשוניות…" />;
+    return <AdminNotApproved email={authUser.email} />;
+  }
+
+  return <AdminShell authUser={authUser} mikvehsCtl={mikvehsCtl} adminEmails={adminEmails} setAdminEmails={setAdminEmails} />;
+}
+
+function AdminGoogleGate() {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const go = async () => {
+    setBusy(true); setErr("");
+    try { await signInWithGoogle(); }
+    catch (e) { setErr("ההתחברות נכשלה. נסי שוב."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div style={{ display: "flex", justifyContent: "center", paddingTop: 40 }}>
+      <div style={{ width: "100%", maxWidth: 400, background: COLORS.paper, borderRadius: 20, padding: 28, border: `1px solid ${COLORS.teal}22`, textAlign: "center" }}>
+        <ShieldCheck size={28} color={COLORS.teal} style={{ marginBottom: 10 }} />
+        <h2 className="font-display" style={{ margin: "0 0 6px" }}>כניסת מנהל/ת</h2>
+        <p style={{ color: "#3a5250", fontSize: 13.5, marginBottom: 18, lineHeight: 1.6 }}>ממשק הניהול והבקרה דורש התחברות עם חשבון Google מאושר.</p>
+        <button style={{ ...btnPrimary, margin: "0 auto" }} onClick={go} disabled={busy}>
+          {busy ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <KeyRound size={16} />}
+          {busy ? "מתחברת…" : "התחברות עם Google"}
+        </button>
+        {err && <div style={{ color: COLORS.red, fontSize: 13, marginTop: 10 }}>{err}</div>}
+      </div>
+    </div>
+  );
+}
+
+function AdminNotApproved({ email }) {
+  return (
+    <SetupMessage bad title="החשבון לא מאושר לניהול" text={`החשבון ${email} לא נמצא ברשימת המנהלים המאושרים. יש לבקש ממנהל/ת קיים/ת להוסיף את הכתובת הזו במסך "הרשאות".`}
+      action={<button style={btnGhost} onClick={() => signOutUser()}><LogOut size={15} /> החלפת חשבון</button>} />
+  );
+}
+
+function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
+  const mikvehs = mikvehsCtl.list;
+  const [mikvehId, setMikvehId] = useState(mikvehs[0]?.id || "");
+  const [tab, setTab] = useState(mikvehs.length ? "overview" : "mikvehs");
+
+  useEffect(() => {
+    if (!mikvehs.find((m) => m.id === mikvehId) && mikvehs[0]) setMikvehId(mikvehs[0].id);
+  }, [mikvehs, mikvehId]);
+
+  const mikveh = mikvehs.find((m) => m.id === mikvehId);
+  const data = useSystemData(mikvehId);
+
   const tabs = [
+    { id: "overview", label: "סקירת מקוואות", icon: Building2 },
     { id: "dashboard", label: "דשבורד", icon: TrendingUp },
     { id: "attendance", label: "נוכחות וסידור", icon: CalendarCheck },
     { id: "water", label: "איכות מים", icon: Thermometer },
     { id: "finance", label: "דוחות כספיים", icon: FileSpreadsheet },
     { id: "audit", label: "יומן שינויים", icon: History },
     { id: "tickets", label: "קריאות תפעול", icon: Wrench },
+    { id: "mikvehs", label: "ניהול מקוואות", icon: MapPin },
+    { id: "permissions", label: "הרשאות", icon: ShieldCheck },
   ];
+  const needsMikveh = !["overview", "mikvehs", "permissions"].includes(tab);
+
   return (
     <div style={{ paddingTop: 18 }}>
-      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+        <div style={{ fontSize: 12.5, color: COLORS.teal }}>מחוברת כ-<b>{authUser.displayName || authUser.email}</b></div>
+        <button onClick={() => signOutUser()} style={{ ...btnGhost, padding: "6px 12px", fontSize: 12 }}><LogOut size={13} /> התנתקות</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, marginBottom: 12 }}>
         {tabs.map((t) => {
           const Icon = t.icon; const active = tab === t.id;
           return (
@@ -768,19 +1073,208 @@ function AdminApp() {
           );
         })}
       </div>
-      {tab === "dashboard" && <AdminDashboard data={data} />}
-      {tab === "attendance" && <AdminAttendance data={data} />}
-      {tab === "water" && <AdminWater data={data} />}
-      {tab === "finance" && <AdminFinance data={data} />}
-      {tab === "audit" && <AdminAudit data={data} />}
-      {tab === "tickets" && <AdminTickets data={data} />}
+
+      {needsMikveh && mikvehs.length > 1 && (
+        <div style={{ marginBottom: 16 }}>
+          <select value={mikvehId} onChange={(e) => setMikvehId(e.target.value)} style={{ ...inputStyle, width: "auto", minWidth: 220, fontWeight: 700 }}>
+            {mikvehs.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {tab === "overview" && <AdminOverviewAllMikvehs mikvehs={mikvehs} onSelect={(id) => { setMikvehId(id); setTab("dashboard"); }} />}
+      {needsMikveh && !mikveh && <Empty text="אין עדיין מקוואות במערכת — יש להוסיף מקווה בלשונית 'ניהול מקוואות'." />}
+      {tab === "dashboard" && mikveh && <AdminDashboard data={data} />}
+      {tab === "attendance" && mikveh && <AdminAttendance data={data} />}
+      {tab === "water" && mikveh && <AdminWater data={data} />}
+      {tab === "finance" && mikveh && <AdminFinance data={data} />}
+      {tab === "audit" && mikveh && <AdminAudit data={data} />}
+      {tab === "tickets" && mikveh && <AdminTickets data={data} />}
+      {tab === "mikvehs" && <AdminMikvehs mikvehsCtl={mikvehsCtl} />}
+      {tab === "permissions" && <AdminPermissions adminEmails={adminEmails} setAdminEmails={setAdminEmails} mikvehs={mikvehs} authUser={authUser} />}
     </div>
+  );
+}
+
+function StatMini({ label, value, warn }) {
+  return (
+    <div style={{ textAlign: "center" }}>
+      <div style={{ fontSize: 17, fontWeight: 800, color: warn ? COLORS.red : COLORS.ink }}>{value}</div>
+      <div style={{ fontSize: 10.5, color: "#7a8f8d" }}>{label}</div>
+    </div>
+  );
+}
+
+function AdminOverviewAllMikvehs({ mikvehs, onSelect }) {
+  const [rows, setRows] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const today = todayStr();
+      const results = await Promise.all(mikvehs.map(async (m) => {
+        const [checklist, dippers, malfunctions, inventory] = await Promise.all([
+          storage.get(`checklist-by-date:${m.id}`).catch(() => null),
+          storage.get(`dippers-log:${m.id}`).catch(() => null),
+          storage.get(`malfunctions:${m.id}`).catch(() => null),
+          storage.get(`inventory:${m.id}`).catch(() => null),
+        ]);
+        const todayChecklist = checklist ? checklist[today] : null;
+        const todayDippers = (dippers || []).filter((d) => d.date === today).reduce((s, d) => s + d.count, 0);
+        const openTickets = (malfunctions || []).filter((t) => t.status !== "טופל").length;
+        const lowStock = inventory ? Object.values(inventory).filter((i) => i.qty <= i.threshold).length : 0;
+        return { mikveh: m, opened: !!(todayChecklist && todayChecklist.opened), closed: !!(todayChecklist && todayChecklist.closed), todayDippers, openTickets, lowStock };
+      }));
+      if (active) setRows(results);
+    })();
+    return () => { active = false; };
+  }, [mikvehs]);
+
+  if (mikvehs.length === 0) return <Empty text="אין עדיין מקוואות — הוסיפי מקווה בלשונית 'ניהול מקוואות'." />;
+  if (rows === null) return <CenteredLoading text="טוענת נתוני מקוואות…" />;
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 14 }}>
+      {rows.map((r) => (
+        <button key={r.mikveh.id} onClick={() => onSelect(r.mikveh.id)} style={{
+          textAlign: "right", background: COLORS.paper, border: `1px solid ${COLORS.aqua}22`, borderRadius: 16, padding: 18, cursor: "pointer",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+            <div>
+              <div className="font-display" style={{ fontWeight: 700, fontSize: 16 }}>{r.mikveh.name}</div>
+              <div style={{ fontSize: 12, color: "#7a8f8d" }}>{r.mikveh.address}</div>
+            </div>
+            <span style={{ fontSize: 11.5, fontWeight: 700, padding: "3px 9px", borderRadius: 8, background: r.closed ? "#eee" : r.opened ? COLORS.aquaLight : COLORS.redLight, color: r.closed ? "#777" : r.opened ? COLORS.teal : COLORS.red }}>
+              {r.closed ? "נסגר" : r.opened ? "פתוח" : "טרם נפתח"}
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 16, marginTop: 14, paddingTop: 14, borderTop: "1px solid #00000010" }}>
+            <StatMini label="טובלות היום" value={r.todayDippers} />
+            <StatMini label="קריאות פתוחות" value={r.openTickets} warn={r.openTickets > 0} />
+            <StatMini label="מלאי נמוך" value={r.lowStock} warn={r.lowStock > 0} />
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AdminMikvehs({ mikvehsCtl }) {
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [copiedId, setCopiedId] = useState("");
+
+  const add = () => {
+    if (!name.trim()) return;
+    mikvehsCtl.addMikveh(name.trim(), address.trim());
+    setName(""); setAddress("");
+  };
+
+  const pairingUrl = (m) => `${window.location.origin}${window.location.pathname}#/kiosk-setup/${m.id}/${m.setupToken}`;
+  const copy = async (m) => {
+    try { await navigator.clipboard.writeText(pairingUrl(m)); setCopiedId(m.id); setTimeout(() => setCopiedId(""), 2000); }
+    catch (e) { /* clipboard blocked — link is still selectable text */ }
+  };
+
+  return (
+    <>
+      <Card title="הוספת מקווה חדש" icon={Building2}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 12, marginBottom: 14 }}>
+          <Field label="שם המקווה"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="לדוגמה: מקווה שכונת הפרחים" /></Field>
+          <Field label="כתובת"><input style={inputStyle} value={address} onChange={(e) => setAddress(e.target.value)} /></Field>
+        </div>
+        <button style={btnPrimary} onClick={add}><Plus size={16} /> הוספת מקווה</button>
+      </Card>
+
+      <Card title="מקוואות ברשת" icon={MapPin}>
+        {mikvehsCtl.list.length === 0 && <Empty text="אין עדיין מקוואות." />}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {mikvehsCtl.list.map((m) => (
+            <div key={m.id} style={{ border: "1px solid #00000012", borderRadius: 13, padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{m.name}</div>
+                  <div style={{ fontSize: 12.5, color: "#7a8f8d" }}>{m.address}</div>
+                </div>
+                <button onClick={() => { if (window.confirm(`למחוק את "${m.name}"? כל הנתונים שלו יישארו מאוחסנים אך לא יוצגו יותר.`)) mikvehsCtl.removeMikveh(m.id); }}
+                  style={{ ...btnGhost, padding: "6px 9px", color: COLORS.red, borderColor: COLORS.red + "55" }}><Trash2 size={14} /></button>
+              </div>
+              <div style={{ marginTop: 12, background: COLORS.seafoam, borderRadius: 11, padding: 12 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><Tablet size={13} /> קישור להתקנת טאבלט קבוע במקווה זה</div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <code style={{ flex: 1, minWidth: 160, fontSize: 11.5, background: "#fff", padding: "6px 9px", borderRadius: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pairingUrl(m)}</code>
+                  <button onClick={() => copy(m)} style={{ ...btnGhost, padding: "6px 10px", fontSize: 11.5 }}><Copy size={12} /> {copiedId === m.id ? "הועתק!" : "העתקה"}</button>
+                  <button onClick={() => mikvehsCtl.regenerateToken(m.id)} style={{ ...btnGhost, padding: "6px 10px", fontSize: 11.5 }}><RefreshCw size={12} /> קישור חדש</button>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 11.5, color: "#7a8f8d" }}>לפתוח את הקישור בדפדפן הטאבלט הפיזי שיישאר קבוע במקווה — פעולה חד-פעמית. "קישור חדש" מבטל קישורים קודמים שהודלפו.</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </>
+  );
+}
+
+function AdminPermissions({ adminEmails, setAdminEmails, mikvehs, authUser }) {
+  const [kioskEmails, setKioskEmails] = useShared("kiosk-emails", []);
+
+  const [newAdminEmail, setNewAdminEmail] = useState("");
+  const [newAdminName, setNewAdminName] = useState("");
+  const addAdmin = () => {
+    if (!newAdminEmail.trim()) return;
+    setAdminEmails((prev) => [...prev, { email: newAdminEmail.trim().toLowerCase(), name: newAdminName.trim() || newAdminEmail.trim(), addedAt: new Date().toISOString() }]);
+    setNewAdminEmail(""); setNewAdminName("");
+  };
+  const removeAdmin = (email) => {
+    if (adminEmails.length <= 1) { window.alert("לא ניתן להסיר את המנהל/ת האחרון/ה — כך לא תישארי חסומה מחוץ למערכת."); return; }
+    setAdminEmails((prev) => prev.filter((a) => a.email !== email));
+  };
+
+  const [newKioskEmail, setNewKioskEmail] = useState("");
+  const [newKioskName, setNewKioskName] = useState("");
+  const [newKioskMikveh, setNewKioskMikveh] = useState(mikvehs[0]?.id || "");
+  const addKiosk = () => {
+    if (!newKioskEmail.trim() || !newKioskName.trim() || !newKioskMikveh) return;
+    setKioskEmails((prev) => [...prev, { email: newKioskEmail.trim().toLowerCase(), staffName: newKioskName.trim(), mikvehId: newKioskMikveh, addedAt: new Date().toISOString() }]);
+    setNewKioskEmail(""); setNewKioskName("");
+  };
+  const removeKiosk = (idx) => setKioskEmails((prev) => prev.filter((_, i) => i !== idx));
+
+  return (
+    <>
+      <Card title="מנהלי מערכת — כניסה ל'ניהול ובקרה'" icon={ShieldCheck}>
+        <p style={{ fontSize: 13, color: "#3a5250", marginTop: 0 }}>רק כתובות Google ברשימה הזו יוכלו להתחבר לממשק הניהול.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, marginBottom: 16 }}>
+          <input placeholder="שם" style={inputStyle} value={newAdminName} onChange={(e) => setNewAdminName(e.target.value)} />
+          <input placeholder="[email protected]" style={inputStyle} value={newAdminEmail} onChange={(e) => setNewAdminEmail(e.target.value)} />
+          <button style={btnPrimary} onClick={addAdmin}><Plus size={15} /> הוספה</button>
+        </div>
+        <Table headers={["שם", "אימייל", ""]}
+          rows={adminEmails.map((a) => [a.name, a.email, a.email === authUser.email.toLowerCase() ? <span key="me" style={{ fontSize: 11.5, color: "#7a8f8d" }}>את/ה</span> : <button key="x" onClick={() => removeAdmin(a.email)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5, color: COLORS.red }}><Trash2 size={12} /></button>])}
+          empty="אין מנהלים מוגדרים." />
+      </Card>
+
+      <Card title="בלניות מאושרות — כניסה מהטלפון האישי" icon={Smartphone}>
+        <p style={{ fontSize: 13, color: "#3a5250", marginTop: 0 }}>מיפוי בין חשבון Google, שם הבלנית והמקווה שלה. כניסה מטלפון אישי (שאינו טאבלט מותקן) תעבוד רק לכתובות שברשימה זו.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 10, marginBottom: 16 }}>
+          <input placeholder="שם הבלנית" style={inputStyle} value={newKioskName} onChange={(e) => setNewKioskName(e.target.value)} />
+          <input placeholder="[email protected]" style={inputStyle} value={newKioskEmail} onChange={(e) => setNewKioskEmail(e.target.value)} />
+          <select style={inputStyle} value={newKioskMikveh} onChange={(e) => setNewKioskMikveh(e.target.value)}>
+            {mikvehs.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <button style={btnPrimary} onClick={addKiosk}><Plus size={15} /> הוספה</button>
+        </div>
+        <Table headers={["בלנית", "אימייל", "מקווה", ""]}
+          rows={kioskEmails.map((k, i) => [k.staffName, k.email, (mikvehs.find((m) => m.id === k.mikvehId) || {}).name || "—", <button key="x" onClick={() => removeKiosk(i)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5, color: COLORS.red }}><Trash2 size={12} /></button>])}
+          empty="אין בלניות מאושרות לכניסה מהטלפון." />
+      </Card>
+    </>
   );
 }
 
 function StatCard({ label, value, icon: Icon, color = COLORS.teal }) {
   return (
-    <div style={{ background: COLORS.paper, borderRadius: 14, padding: 18, border: `1px solid ${color}22`, flex: 1, minWidth: 150 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, color, marginBottom: 8 }}>
         <Icon size={16} /><span style={{ fontSize: 12.5, fontWeight: 700 }}>{label}</span>
       </div>
@@ -989,14 +1483,42 @@ function Table({ headers, rows, empty }) {
 /* ============================================================
    PUBLIC APP (residents)
    ============================================================ */
-function PublicApp() {
-  const data = useSystemData();
+function PublicApp({ mikvehs }) {
+  const [mikvehId, setMikvehId] = useState(mikvehs[0]?.id || "");
+  useEffect(() => {
+    if (!mikvehs.find((m) => m.id === mikvehId) && mikvehs[0]) setMikvehId(mikvehs[0].id);
+  }, [mikvehs, mikvehId]);
+  const mikveh = mikvehs.find((m) => m.id === mikvehId);
+
+  if (mikvehs.length === 0) {
+    return <div style={{ paddingTop: 40 }}><Empty text="אין כרגע מקוואות פעילים במערכת." /></div>;
+  }
+
+  return (
+    <div style={{ paddingTop: 18 }}>
+      {mikvehs.length > 1 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+          {mikvehs.map((m) => (
+            <button key={m.id} onClick={() => setMikvehId(m.id)} style={{
+              padding: "9px 16px", borderRadius: 11, border: `1.5px solid ${m.id === mikvehId ? COLORS.teal : "#00000018"}`,
+              background: m.id === mikvehId ? COLORS.aquaLight : "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13.5,
+            }}>{m.name}</button>
+          ))}
+        </div>
+      )}
+      {mikveh && <PublicMikvehDetail mikveh={mikveh} />}
+    </div>
+  );
+}
+
+function PublicMikvehDetail({ mikveh }) {
+  const data = useSystemData(mikveh.id);
   const today = todayStr();
   const staffToday = data.loginLog.find((l) => l.ts.slice(0, 10) === today);
   const isOpenDay = OPENING_HOURS[new Date().getDay()].hours !== "סגור";
 
   return (
-    <div style={{ paddingTop: 18 }}>
+    <>
       <div style={{ background: `linear-gradient(135deg, ${COLORS.teal}, ${COLORS.aqua})`, borderRadius: 20, padding: 26, color: "#fff", marginBottom: 20, position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, opacity: 0.15 }}>
           <WaveDivider color="#fff" opacity={1} />
@@ -1005,8 +1527,9 @@ function PublicApp() {
           <span style={{ width: 10, height: 10, borderRadius: "50%", background: isOpenDay ? "#8CE0B0" : "#EFA6A0" }} />
           <span style={{ fontWeight: 700, fontSize: 14 }}>{isOpenDay ? "פתוח היום" : "סגור היום"}</span>
         </div>
-        <h1 className="font-display" style={{ margin: "0 0 6px", fontSize: 26 }}>מקווה נשים — {OPENING_HOURS[new Date().getDay()].day}</h1>
+        <h1 className="font-display" style={{ margin: "0 0 6px", fontSize: 26 }}>{mikveh.name} — {OPENING_HOURS[new Date().getDay()].day}</h1>
         <p style={{ margin: 0, opacity: 0.95, fontSize: 15 }}>שעות היום: <b>{OPENING_HOURS[new Date().getDay()].hours}</b>{staffToday && <> · בלנית במשמרת: <b>{staffToday.staffName}</b></>}</p>
+        <p style={{ marginTop: 4, opacity: 0.9, fontSize: 13 }}>{mikveh.address}</p>
         <p style={{ marginTop: 8, fontSize: 12.5, opacity: 0.85 }}>שעות השבוע הצמודות לשקיעה/צאת הכוכבים מחושבות אוטומטית באתר הסופי; כאן מוצגות שעות לדוגמה.</p>
       </div>
 
@@ -1027,7 +1550,7 @@ function PublicApp() {
         </div>
         <PublicBooking data={data} />
       </div>
-    </div>
+    </>
   );
 }
 
