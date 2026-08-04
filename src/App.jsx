@@ -11,7 +11,8 @@ import {
   ClipboardList, LineChart as LineChartIcon, FileSpreadsheet, History,
   PhoneCall, Clock, MapPin, Accessibility, CalendarCheck, ShieldAlert,
   Thermometer, TrendingUp, Download, RefreshCw, Building2, ShieldCheck,
-  Link2, Copy, Tablet, Smartphone, Settings, Trash2, KeyRound, Loader2
+  Link2, Copy, Tablet, Smartphone, Settings, Trash2, KeyRound, Loader2, Navigation,
+  Image, ImagePlus, ArrowRight
 } from "lucide-react";
 
 /* ============================================================
@@ -103,7 +104,7 @@ const OPENING_HOURS = [
 ];
 
 const DEFAULT_MIKVEHS = [
-  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", setupToken: uid() },
+  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", accessible: true, bookingEnabled: false, photoUrl: "", photos: [], hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
 ];
 
 /* ============================================================
@@ -144,7 +145,7 @@ function useMikvehs() {
   const [list, setList] = useShared("mikvehs", DEFAULT_MIKVEHS);
 
   const addMikveh = useCallback((name, address) => {
-    setList((prev) => [...prev, { id: uid(), name, address, setupToken: uid() }]);
+    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, bookingEnabled: false, photoUrl: "", photos: [], hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
   }, [setList]);
 
   const updateMikveh = useCallback((id, patch) => {
@@ -193,7 +194,7 @@ export default function MikvehSystem() {
 
   if (!authReady) {
     return (
-      <div dir="rtl" style={{ background: COLORS.seafoam, minHeight: "100%", fontFamily: "'Assistant', sans-serif", color: COLORS.ink }}>
+      <div dir="rtl" style={{ background: COLORS.seafoam, minHeight: "100%", width: "100%", overflowX: "hidden", fontFamily: "'Assistant', sans-serif", color: COLORS.ink, boxSizing: "border-box" }}>
         <FontLoader />
         <CenteredLoading text="טוענת…" />
       </div>
@@ -203,7 +204,7 @@ export default function MikvehSystem() {
   // one-time tablet pairing link: #/kiosk-setup/{mikvehId}/{token}
   if (route.startsWith("kiosk-setup/")) {
     return (
-      <div dir="rtl" style={{ background: COLORS.seafoam, minHeight: "100%", fontFamily: "'Assistant', sans-serif", color: COLORS.ink }}>
+      <div dir="rtl" style={{ background: COLORS.seafoam, minHeight: "100%", width: "100%", overflowX: "hidden", fontFamily: "'Assistant', sans-serif", color: COLORS.ink, boxSizing: "border-box" }}>
         <FontLoader />
         <div style={{ maxWidth: 1180, margin: "0 auto", padding: "18px 16px 48px" }}>
           <KioskSetupHandler route={route} mikvehs={mikvehs} navigate={navigate} />
@@ -215,7 +216,7 @@ export default function MikvehSystem() {
   const topRoute = route === "public" ? "public" : route === "admin" ? "admin" : "kiosk";
 
   return (
-    <div dir="rtl" style={{ background: COLORS.seafoam, minHeight: "100%", fontFamily: "'Assistant', sans-serif", color: COLORS.ink }}>
+    <div dir="rtl" style={{ background: COLORS.seafoam, minHeight: "100%", width: "100%", overflowX: "hidden", fontFamily: "'Assistant', sans-serif", color: COLORS.ink, boxSizing: "border-box" }}>
       <FontLoader />
       <TopBar route={topRoute} navigate={navigate} />
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 16px 48px" }}>
@@ -235,6 +236,13 @@ function FontLoader() {
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;700;800&family=Assistant:wght@400;500;600;700&display=swap');
       * { box-sizing: border-box; }
+      html, body { overflow-x: hidden; max-width: 100%; }
+      img { max-width: 100%; height: auto; display: block; }
+      input, select, textarea { max-width: 100%; }
+      .two-col { display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; }
+      @media (max-width: 720px) {
+        .two-col { grid-template-columns: 1fr; }
+      }
       h1,h2,h3,.font-display { font-family: 'Heebo', sans-serif; }
       button { font-family: inherit; }
       ::selection { background: ${COLORS.gold}55; }
@@ -267,7 +275,7 @@ function TopBar({ route, navigate }) {
           </div>
           <span className="font-display" style={{ color: "#fff", fontWeight: 800, fontSize: 19 }}>רשת המקוואות</span>
         </button>
-        <div style={{ display: "flex", gap: 4, background: "#ffffff17", padding: 4, borderRadius: 12 }}>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", background: "#ffffff17", padding: 4, borderRadius: 12 }}>
           {tabs.map((t) => {
             const Icon = t.icon;
             const active = route === t.id;
@@ -349,6 +357,7 @@ function useSystemData(mikvehId) {
   const [auditLog, setAuditLog] = useShared(k("audit-log"), []);
   const [loginLog, setLoginLog] = useShared(k("login-log"), []);
   const [appointments, setAppointments] = useShared(k("appointments"), []);
+  const [defaultSchedule, setDefaultSchedule] = useShared(k("default-schedule"), {});
 
   const addAudit = useCallback((staffName, action, details) => {
     setAuditLog((prev) => [{ id: uid(), ts: new Date().toISOString(), staffName, action, details }, ...prev].slice(0, 500));
@@ -365,6 +374,7 @@ function useSystemData(mikvehId) {
     auditLog, addAudit,
     loginLog, setLoginLog,
     appointments, setAppointments,
+    defaultSchedule, setDefaultSchedule,
   };
 }
 
@@ -376,6 +386,7 @@ function KioskApp({ mikvehs }) {
   const [authUser, authLoading] = useAuthUser();
   const [kioskEmails] = useShared("kiosk-emails", []);
   const [chosenMikvehId, setChosenMikvehId] = useState("");
+  const [entryMode, setEntryMode] = useState(null); // null | "tablet-info" | "google"
 
   const deviceMikveh = mikvehs.find((m) => m.id === deviceMikvehId);
 
@@ -389,9 +400,18 @@ function KioskApp({ mikvehs }) {
       action={<button style={btnGhost} onClick={() => { unpairDevice(); window.location.reload(); }}>ניתוק המכשיר</button>} />;
   }
 
+  // --- No device pairing yet: let the person choose how they want to connect ---
+  if (entryMode === null) return <KioskEntryChoice onChooseTablet={() => setEntryMode("tablet-info")} onChooseGoogle={() => setEntryMode("google")} />;
+  if (entryMode === "tablet-info") {
+    return (
+      <SetupMessage title="חיבור טאבלט קבוע" text='חיבור מכשיר כטאבלט קבוע נעשה על ידי המנהל/ת: בממשק "ניהול ובקרה" ← "ניהול מקוואות" יש קישור ייעודי לכל מקווה. יש לפתוח את הקישור הזה פעם אחת בדפדפן של הטאבלט הפיזי שיישאר קבוע במקווה, ומשם הכניסה תהיה תמיד ישירה עם שם וקוד אישי.'
+        action={<button style={btnGhost} onClick={() => setEntryMode(null)}><ArrowRight size={15} /> חזרה</button>} />
+    );
+  }
+
   // --- Path B: personal phone — requires Google sign-in + an approved email ---
   if (authLoading) return <CenteredLoading text="בודק התחברות…" />;
-  if (!authUser || authUser.isAnonymous) return <KioskGoogleGate />;
+  if (!authUser || authUser.isAnonymous) return <KioskGoogleGate onBack={() => setEntryMode(null)} />;
 
   const myApprovals = kioskEmails.filter((e) => e.email.trim().toLowerCase() === authUser.email.toLowerCase());
   if (myApprovals.length === 0) return <KioskNotApproved email={authUser.email} />;
@@ -439,7 +459,43 @@ function CenteredLoading({ text }) {
   );
 }
 
-function KioskGoogleGate() {
+function KioskEntryChoice({ onChooseTablet, onChooseGoogle }) {
+  const options = [
+    { id: "tablet", title: "חיבור באמצעות טאבלט", desc: "למכשיר קבוע שנשאר במקווה — מחובר פעם אחת דרך קישור מהמנהל/ת, ומשם כניסה עם שם וקוד אישי.", icon: Tablet, onClick: onChooseTablet },
+    { id: "google", title: "חיבור באמצעות חשבון Google", desc: "לכניסה מהטלפון האישי שלך — דורש חשבון Google שאושר מראש על ידי המנהל/ת.", icon: Smartphone, onClick: onChooseGoogle },
+  ];
+  return (
+    <div style={{ display: "flex", justifyContent: "center", paddingTop: 40 }}>
+      <div style={{ width: "100%", maxWidth: 460, textAlign: "center" }}>
+        <Droplets size={28} color={COLORS.aqua} style={{ marginBottom: 8 }} />
+        <h2 className="font-display" style={{ margin: "0 0 6px", fontSize: 22 }}>התחברות לבלניות</h2>
+        <p style={{ color: COLORS.teal, fontSize: 13.5, marginBottom: 22 }}>איך תרצי להתחבר?</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {options.map((o) => {
+            const Icon = o.icon;
+            return (
+              <button key={o.id} onClick={o.onClick} style={{
+                textAlign: "right", background: COLORS.paper, border: `1px solid ${COLORS.aqua}33`, borderRadius: 16,
+                padding: 18, cursor: "pointer", display: "flex", alignItems: "center", gap: 14,
+              }}>
+                <div style={{ width: 42, height: 42, borderRadius: 11, background: COLORS.aquaLight, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Icon size={21} color={COLORS.teal} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{o.title}</div>
+                  <div style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 2, lineHeight: 1.5 }}>{o.desc}</div>
+                </div>
+                <ChevronRight size={16} style={{ transform: "scaleX(-1)", color: COLORS.teal, flexShrink: 0 }} />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KioskGoogleGate({ onBack }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const go = async () => {
@@ -460,6 +516,7 @@ function KioskGoogleGate() {
           {busy ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <KeyRound size={16} />}
           {busy ? "מתחברת…" : "התחברות עם Google"}
         </button>
+        {onBack && <button onClick={onBack} style={{ display: "block", margin: "14px auto 0", background: "none", border: "none", cursor: "pointer", fontSize: 12.5, color: "#9ab0ad" }}>חזרה</button>}
         {err && <div style={{ color: COLORS.red, fontSize: 13, marginTop: 10 }}>{err}</div>}
       </div>
     </div>
@@ -534,7 +591,7 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
       </div>
 
       {/* tabs */}
-      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         {kioskTabs.map((t) => {
           const Icon = t.icon;
           const active = tab === t.id;
@@ -582,8 +639,8 @@ function Toast({ text }) {
 
 function Card({ title, icon: Icon, children, right }) {
   return (
-    <div style={{ background: COLORS.paper, borderRadius: 16, padding: 20, border: `1px solid ${COLORS.aqua}22`, marginBottom: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+    <div style={{ background: COLORS.paper, borderRadius: 16, padding: 20, border: `1px solid ${COLORS.aqua}22`, marginBottom: 16, maxWidth: "100%", overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
           {Icon && <Icon size={18} color={COLORS.teal} />}
           <h3 style={{ margin: 0, fontSize: 16.5 }}>{title}</h3>
@@ -1061,7 +1118,7 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
         <button onClick={() => signOutUser()} style={{ ...btnGhost, padding: "6px 12px", fontSize: 12 }}><LogOut size={13} /> התנתקות</button>
       </div>
 
-      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         {tabs.map((t) => {
           const Icon = t.icon; const active = tab === t.id;
           return (
@@ -1162,18 +1219,11 @@ function AdminOverviewAllMikvehs({ mikvehs, onSelect }) {
 function AdminMikvehs({ mikvehsCtl }) {
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
-  const [copiedId, setCopiedId] = useState("");
 
   const add = () => {
     if (!name.trim()) return;
     mikvehsCtl.addMikveh(name.trim(), address.trim());
     setName(""); setAddress("");
-  };
-
-  const pairingUrl = (m) => `${window.location.origin}${window.location.pathname}#/kiosk-setup/${m.id}/${m.setupToken}`;
-  const copy = async (m) => {
-    try { await navigator.clipboard.writeText(pairingUrl(m)); setCopiedId(m.id); setTimeout(() => setCopiedId(""), 2000); }
-    catch (e) { /* clipboard blocked — link is still selectable text */ }
   };
 
   return (
@@ -1186,33 +1236,206 @@ function AdminMikvehs({ mikvehsCtl }) {
         <button style={btnPrimary} onClick={add}><Plus size={16} /> הוספת מקווה</button>
       </Card>
 
-      <Card title="מקוואות ברשת" icon={MapPin}>
-        {mikvehsCtl.list.length === 0 && <Empty text="אין עדיין מקוואות." />}
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {mikvehsCtl.list.map((m) => (
-            <div key={m.id} style={{ border: "1px solid #00000012", borderRadius: 13, padding: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{m.name}</div>
-                  <div style={{ fontSize: 12.5, color: "#7a8f8d" }}>{m.address}</div>
-                </div>
-                <button onClick={() => { if (window.confirm(`למחוק את "${m.name}"? כל הנתונים שלו יישארו מאוחסנים אך לא יוצגו יותר.`)) mikvehsCtl.removeMikveh(m.id); }}
-                  style={{ ...btnGhost, padding: "6px 9px", color: COLORS.red, borderColor: COLORS.red + "55" }}><Trash2 size={14} /></button>
-              </div>
-              <div style={{ marginTop: 12, background: COLORS.seafoam, borderRadius: 11, padding: 12 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><Tablet size={13} /> קישור להתקנת טאבלט קבוע במקווה זה</div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <code style={{ flex: 1, minWidth: 160, fontSize: 11.5, background: "#fff", padding: "6px 9px", borderRadius: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pairingUrl(m)}</code>
-                  <button onClick={() => copy(m)} style={{ ...btnGhost, padding: "6px 10px", fontSize: 11.5 }}><Copy size={12} /> {copiedId === m.id ? "הועתק!" : "העתקה"}</button>
-                  <button onClick={() => mikvehsCtl.regenerateToken(m.id)} style={{ ...btnGhost, padding: "6px 10px", fontSize: 11.5 }}><RefreshCw size={12} /> קישור חדש</button>
-                </div>
-                <div style={{ marginTop: 6, fontSize: 11.5, color: "#7a8f8d" }}>לפתוח את הקישור בדפדפן הטאבלט הפיזי שיישאר קבוע במקווה — פעולה חד-פעמית. "קישור חדש" מבטל קישורים קודמים שהודלפו.</div>
+      {mikvehsCtl.list.length === 0 && <Empty text="אין עדיין מקוואות." />}
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {mikvehsCtl.list.map((m) => (
+          <MikvehRow key={m.id} mikveh={m} mikvehsCtl={mikvehsCtl} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function MikvehRow({ mikveh, mikvehsCtl }) {
+  const [expanded, setExpanded] = useState(false);
+  const data = useSystemData(mikveh.id);
+  const today = todayStr();
+  const weekday = new Date().getDay();
+  const hours = mikveh.hours || OPENING_HOURS;
+  const todaysHours = (hours[weekday] || {}).hours || "לא הוגדר";
+
+  const todayChecklist = data.checklist[today];
+  const isOpenNow = !!(todayChecklist && todayChecklist.opened && !todayChecklist.closed);
+
+  const actualStaffToday = data.loginLog.find((l) => l.ts.slice(0, 10) === today);
+  const defaultStaffId = data.defaultSchedule[weekday];
+  const defaultStaffName = defaultStaffId ? ((data.staff.find((s) => s.id === defaultStaffId) || {}).name) : null;
+  const tonightName = actualStaffToday ? actualStaffToday.staffName : defaultStaffName;
+
+  const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
+
+  const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "" });
+  useEffect(() => { setForm({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "" }); }, [mikveh.id]);
+  const saveForm = () => mikvehsCtl.updateMikveh(mikveh.id, form);
+
+  const [newPhotoUrl, setNewPhotoUrl] = useState("");
+  const addPhoto = () => {
+    if (!newPhotoUrl.trim()) return;
+    mikvehsCtl.updateMikveh(mikveh.id, { photos: [...(mikveh.photos || []), newPhotoUrl.trim()] });
+    setNewPhotoUrl("");
+  };
+  const removePhoto = (idx) => {
+    mikvehsCtl.updateMikveh(mikveh.id, { photos: (mikveh.photos || []).filter((_, i) => i !== idx) });
+  };
+
+  const setScheduleDay = (dayIdx, staffId) => {
+    data.setDefaultSchedule((prev) => ({ ...prev, [dayIdx]: staffId || null }));
+  };
+  const setHourDay = (dayIdx, value) => {
+    const next = hours.map((d, i) => i === dayIdx ? { ...d, hours: value } : d);
+    mikvehsCtl.updateMikveh(mikveh.id, { hours: next });
+  };
+
+  const pairingUrl = `${window.location.origin}${window.location.pathname}#/kiosk-setup/${mikveh.id}/${mikveh.setupToken}`;
+  const [copied, setCopied] = useState(false);
+  const copyPairing = async () => {
+    try { await navigator.clipboard.writeText(pairingUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch (e) { /* clipboard blocked — link is still selectable text */ }
+  };
+
+  return (
+    <div style={{ background: COLORS.paper, borderRadius: 15, border: `1px solid ${COLORS.aqua}22`, overflow: "hidden" }}>
+      <button onClick={() => setExpanded((x) => !x)} style={{
+        width: "100%", textAlign: "right", background: "none", border: "none", cursor: "pointer", padding: 16,
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 200 }}>
+          {mikveh.photoUrl ? (
+            <img src={mikveh.photoUrl} alt="" style={{ width: 40, height: 40, borderRadius: 11, objectFit: "cover", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          ) : (
+            <div style={{ width: 40, height: 40, borderRadius: 11, background: isOpenNow ? COLORS.aquaLight : COLORS.seafoam, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Building2 size={19} color={isOpenNow ? COLORS.teal : COLORS.gold} />
+            </div>
+          )}
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15.5 }}>{mikveh.name}</div>
+            <div style={{ fontSize: 12, color: "#7a8f8d", display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} /> {mikveh.address || "כתובת לא הוגדרה"}</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11.5, fontWeight: 700, padding: "4px 10px", borderRadius: 8, background: isOpenNow ? COLORS.aquaLight : COLORS.redLight, color: isOpenNow ? COLORS.teal : COLORS.red, whiteSpace: "nowrap" }}>
+            {isOpenNow ? "פתוח עכשיו" : "סגור עכשיו"}
+          </span>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>{todaysHours}</div>
+            <div style={{ fontSize: 10, color: "#7a8f8d" }}>שעות היום</div>
+          </div>
+          <div style={{ textAlign: "center", minWidth: 70 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>{tonightName || "לא שובצה"}</div>
+            <div style={{ fontSize: 10, color: "#7a8f8d" }}>בלנית הערב{!actualStaffToday && tonightName ? " (משובצת)" : ""}</div>
+          </div>
+          <a href={mapsUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5, textDecoration: "none" }}>
+            <Navigation size={13} /> ניווט
+          </a>
+          <ChevronRight size={17} style={{ transform: expanded ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform .15s", color: COLORS.teal }} />
+        </div>
+      </button>
+
+      {expanded && (
+        <div style={{ borderTop: `1px solid ${COLORS.aqua}22`, padding: 18, display: "flex", flexDirection: "column", gap: 20 }}>
+
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 8 }}>פרטי המקווה</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10, marginBottom: 10 }}>
+              <Field label="שם"><input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+              <Field label="כתובת"><input style={inputStyle} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
+              <Field label="טלפון"><input style={inputStyle} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
+            </div>
+            <Field label="הערות נוספות (יוצגו לתושבות בממשק הציבורי)">
+              <textarea style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+            </Field>
+            <div style={{ marginTop: 10 }}>
+              <Field label="תמונה ראשית (קישור URL) — מוצגת בתצוגה המקדימה ובעמוד הציבורי">
+                <input style={inputStyle} value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} placeholder="https://..." />
+              </Field>
+              {form.photoUrl && (
+                <img src={form.photoUrl} alt="" style={{ marginTop: 8, width: "100%", maxWidth: 260, height: 130, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012" }}
+                  onError={(e) => { e.currentTarget.style.display = "none"; }} />
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <button style={btnPrimary} onClick={saveForm}><Check size={15} /> שמירת פרטים</button>
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <ToggleRow label="נגישות לנכים (מעלון)" checked={!!mikveh.accessible} onChange={(v) => mikvehsCtl.updateMikveh(mikveh.id, { accessible: v })} />
               </div>
             </div>
-          ))}
+          </div>
+
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}><ImagePlus size={14} /> תמונות נוספות</div>
+            <p style={{ fontSize: 11.5, color: "#7a8f8d", marginTop: 0, marginBottom: 8 }}>הדביקי קישור לתמונה מתויקת בענן (Google Drive ציבורי, Imgur וכו') — אין עדיין העלאת קבצים ישירה.</p>
+            {(mikveh.photos || []).length > 0 && (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                {mikveh.photos.map((url, i) => (
+                  <div key={i} style={{ position: "relative" }}>
+                    <img src={url} alt="" style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012" }}
+                      onError={(e) => { e.currentTarget.style.opacity = 0.25; }} />
+                    <button onClick={() => removePhoto(i)} style={{
+                      position: "absolute", top: -6, left: -6, width: 22, height: 22, borderRadius: "50%", background: COLORS.red, color: "#fff",
+                      border: "2px solid #fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                    }}><X size={12} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <input style={{ ...inputStyle, flex: 1 }} value={newPhotoUrl} onChange={(e) => setNewPhotoUrl(e.target.value)} placeholder="https://..." onKeyDown={(e) => e.key === "Enter" && addPhoto()} />
+              <button style={{ ...btnGhost, flexShrink: 0 }} onClick={addPhoto}><Plus size={15} /> הוספה</button>
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 8 }}>שעות פתיחה שבועיות</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {hours.map((d, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ width: 56, fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{d.day}</span>
+                  <input style={{ ...inputStyle, flex: 1 }} value={d.hours} onChange={(e) => setHourDay(i, e.target.value)} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 2 }}>שיבוץ ברירת מחדל — מי הבלנית בכל יום</div>
+            <p style={{ fontSize: 11.5, color: "#7a8f8d", marginTop: 0, marginBottom: 8 }}>משמש כברירת מחדל לתצוגה כל עוד לא נרשמה כניסה בפועל של בלנית באותו יום.</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 8 }}>
+              {WEEKDAYS_HE.map((day, i) => (
+                <div key={i}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, marginBottom: 3 }}>{day}</div>
+                  <select style={inputStyle} value={data.defaultSchedule[i] || ""} onChange={(e) => setScheduleDay(i, e.target.value)}>
+                    <option value="">ללא שיבוץ</option>
+                    {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 8 }}>קביעת תורים באתר הציבורי</div>
+            <ToggleRow label="הצג טופס קביעת תור לתושבות" checked={!!mikveh.bookingEnabled} onChange={(v) => mikvehsCtl.updateMikveh(mikveh.id, { bookingEnabled: v })} />
+            <p style={{ fontSize: 11, color: "#7a8f8d", marginTop: 6 }}>בשלב זה הטופס אינו מחובר בפועל לתשלום או ליומן אמיתי — זו הדמיית תכונה בלבד.</p>
+          </div>
+
+          <div style={{ background: COLORS.seafoam, borderRadius: 11, padding: 12 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><Tablet size={13} /> קישור להתקנת טאבלט קבוע במקווה זה</div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <code style={{ flex: 1, minWidth: 160, fontSize: 11.5, background: "#fff", padding: "6px 9px", borderRadius: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pairingUrl}</code>
+              <button onClick={copyPairing} style={{ ...btnGhost, padding: "6px 10px", fontSize: 11.5 }}><Copy size={12} /> {copied ? "הועתק!" : "העתקה"}</button>
+              <button onClick={() => mikvehsCtl.regenerateToken(mikveh.id)} style={{ ...btnGhost, padding: "6px 10px", fontSize: 11.5 }}><RefreshCw size={12} /> קישור חדש</button>
+            </div>
+            <div style={{ marginTop: 6, fontSize: 11.5, color: "#7a8f8d" }}>לפתוח את הקישור בדפדפן הטאבלט הפיזי שיישאר קבוע במקווה — פעולה חד-פעמית.</div>
+          </div>
+
+          <button onClick={() => { if (window.confirm(`למחוק את "${mikveh.name}"? כל הנתונים שלו יישארו מאוחסנים אך לא יוצגו יותר.`)) mikvehsCtl.removeMikveh(mikveh.id); }}
+            style={{ ...btnGhost, color: COLORS.red, borderColor: COLORS.red + "55", alignSelf: "flex-start" }}>
+            <Trash2 size={14} /> מחיקת המקווה
+          </button>
         </div>
-      </Card>
-    </>
+      )}
+    </div>
   );
 }
 
@@ -1245,7 +1468,7 @@ function AdminPermissions({ adminEmails, setAdminEmails, mikvehs, authUser }) {
     <>
       <Card title="מנהלי מערכת — כניסה ל'ניהול ובקרה'" icon={ShieldCheck}>
         <p style={{ fontSize: 13, color: "#3a5250", marginTop: 0 }}>רק כתובות Google ברשימה הזו יוכלו להתחבר לממשק הניהול.</p>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 16 }}>
           <input placeholder="שם" style={inputStyle} value={newAdminName} onChange={(e) => setNewAdminName(e.target.value)} />
           <input placeholder="[email protected]" style={inputStyle} value={newAdminEmail} onChange={(e) => setNewAdminEmail(e.target.value)} />
           <button style={btnPrimary} onClick={addAdmin}><Plus size={15} /> הוספה</button>
@@ -1257,7 +1480,7 @@ function AdminPermissions({ adminEmails, setAdminEmails, mikvehs, authUser }) {
 
       <Card title="בלניות מאושרות — כניסה מהטלפון האישי" icon={Smartphone}>
         <p style={{ fontSize: 13, color: "#3a5250", marginTop: 0 }}>מיפוי בין חשבון Google, שם הבלנית והמקווה שלה. כניסה מטלפון אישי (שאינו טאבלט מותקן) תעבוד רק לכתובות שברשימה זו.</p>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 10, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 16 }}>
           <input placeholder="שם הבלנית" style={inputStyle} value={newKioskName} onChange={(e) => setNewKioskName(e.target.value)} />
           <input placeholder="[email protected]" style={inputStyle} value={newKioskEmail} onChange={(e) => setNewKioskEmail(e.target.value)} />
           <select style={inputStyle} value={newKioskMikveh} onChange={(e) => setNewKioskMikveh(e.target.value)}>
@@ -1515,33 +1738,64 @@ function PublicApp({ mikvehs }) {
 function PublicMikvehDetail({ mikveh }) {
   const data = useSystemData(mikveh.id);
   const today = todayStr();
-  const staffToday = data.loginLog.find((l) => l.ts.slice(0, 10) === today);
-  const isOpenDay = OPENING_HOURS[new Date().getDay()].hours !== "סגור";
+  const weekday = new Date().getDay();
+  const hours = mikveh.hours || OPENING_HOURS;
+  const todaysHours = (hours[weekday] || {}).hours || "לא הוגדר";
+  const isOpenDay = todaysHours !== "סגור";
+
+  const actualStaffToday = data.loginLog.find((l) => l.ts.slice(0, 10) === today);
+  const defaultStaffId = data.defaultSchedule[weekday];
+  const defaultStaffName = defaultStaffId ? ((data.staff.find((s) => s.id === defaultStaffId) || {}).name) : null;
+  const tonightName = actualStaffToday ? actualStaffToday.staffName : defaultStaffName;
 
   return (
     <>
       <div style={{ background: `linear-gradient(135deg, ${COLORS.teal}, ${COLORS.aqua})`, borderRadius: 20, padding: 26, color: "#fff", marginBottom: 20, position: "relative", overflow: "hidden" }}>
+        {mikveh.photoUrl && (
+          <img src={mikveh.photoUrl} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.32 }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }} />
+        )}
         <div style={{ position: "absolute", inset: 0, opacity: 0.15 }}>
           <WaveDivider color="#fff" opacity={1} />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-          <span style={{ width: 10, height: 10, borderRadius: "50%", background: isOpenDay ? "#8CE0B0" : "#EFA6A0" }} />
-          <span style={{ fontWeight: 700, fontSize: 14 }}>{isOpenDay ? "פתוח היום" : "סגור היום"}</span>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <span style={{ width: 10, height: 10, borderRadius: "50%", background: isOpenDay ? "#8CE0B0" : "#EFA6A0" }} />
+            <span style={{ fontWeight: 700, fontSize: 14 }}>{isOpenDay ? "פתוח היום" : "סגור היום"}</span>
+          </div>
+          <h1 className="font-display" style={{ margin: "0 0 6px", fontSize: 26 }}>{mikveh.name} — {WEEKDAYS_HE[weekday]}</h1>
+          <p style={{ margin: 0, opacity: 0.95, fontSize: 15 }}>שעות היום: <b>{todaysHours}</b>{tonightName && <> · בלנית במשמרת: <b>{tonightName}</b></>}</p>
+          <p style={{ marginTop: 4, opacity: 0.9, fontSize: 13 }}>{mikveh.address}{mikveh.phone && <> · {mikveh.phone}</>}</p>
+          <p style={{ marginTop: 8, fontSize: 12.5, opacity: 0.85 }}>שעות השבוע הצמודות לשקיעה/צאת הכוכבים מחושבות אוטומטית באתר הסופי; כאן מוצגות שעות לדוגמה.</p>
         </div>
-        <h1 className="font-display" style={{ margin: "0 0 6px", fontSize: 26 }}>{mikveh.name} — {OPENING_HOURS[new Date().getDay()].day}</h1>
-        <p style={{ margin: 0, opacity: 0.95, fontSize: 15 }}>שעות היום: <b>{OPENING_HOURS[new Date().getDay()].hours}</b>{staffToday && <> · בלנית במשמרת: <b>{staffToday.staffName}</b></>}</p>
-        <p style={{ marginTop: 4, opacity: 0.9, fontSize: 13 }}>{mikveh.address}</p>
-        <p style={{ marginTop: 8, fontSize: 12.5, opacity: 0.85 }}>שעות השבוע הצמודות לשקיעה/צאת הכוכבים מחושבות אוטומטית באתר הסופי; כאן מוצגות שעות לדוגמה.</p>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 18 }}>
+      <div className="two-col">
         <div>
           <Card title="שעות פתיחה שבועיות" icon={Clock}>
-            <Table headers={["יום", "שעות"]} rows={OPENING_HOURS.map((d) => [d.day, d.hours])} empty="" />
+            <Table headers={["יום", "שעות"]} rows={hours.map((d) => [d.day, d.hours])} empty="" />
           </Card>
+          {(mikveh.photos || []).length > 0 && (
+            <Card title="תמונות מהמקווה" icon={Image}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {mikveh.photos.map((url, i) => (
+                  <img key={i} src={url} alt="" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012" }}
+                    onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                ))}
+              </div>
+            </Card>
+          )}
+          {mikveh.notes && (
+            <Card title="מידע נוסף מהמקווה" icon={StickyNote}>
+              <p style={{ fontSize: 14, lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap" }}>{mikveh.notes}</p>
+            </Card>
+          )}
           <Card title="נגישות ומוצרים במקום" icon={Accessibility}>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {["מעלון נגיש לבעלות מוגבלות", "חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"].map((f) => (
+              {[
+                mikveh.accessible ? "מעלון נגיש לבעלות מוגבלות" : null,
+                "חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה",
+              ].filter(Boolean).map((f) => (
                 <div key={f} style={{ display: "flex", alignItems: "center", gap: 9 }}>
                   <Check size={16} color={COLORS.aqua} /><span style={{ fontSize: 14 }}>{f}</span>
                 </div>
@@ -1549,7 +1803,11 @@ function PublicMikvehDetail({ mikveh }) {
             </div>
           </Card>
         </div>
-        <PublicBooking data={data} />
+        {mikveh.bookingEnabled ? <PublicBooking data={data} /> : (
+          <Card title="קביעת תור" icon={CalendarCheck}>
+            <p style={{ fontSize: 13.5, color: "#7a8f8d", margin: 0 }}>קביעת תורים מקוונת אינה זמינה כרגע במקווה זה. ניתן ליצור קשר טלפוני{mikveh.phone ? <> ({mikveh.phone})</> : ""}.</p>
+          </Card>
+        )}
       </div>
     </>
   );
