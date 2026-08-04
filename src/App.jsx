@@ -766,7 +766,7 @@ function KioskDippers({ data, staffName, flash }) {
     rec.onresult = (e) => {
       const text = e.results[0][0].transcript;
       const numMatch = text.match(/(\d+)\s*טובלות/);
-      const cashMatch = text.match(/(\d+)\s*(ש["״']?ח|שקלים)?\s*מזומן/) || text.match(/מזומן\s*(\d+)/);
+      const cashMatch = text.match(/(\d+)\s*.{0,3}\s*ח\s*מזומן/) || text.match(/מזומן\s*(\d+)/) || text.match(/(\d+)/);
       if (numMatch) setCount(parseInt(numMatch[1], 10));
       if (cashMatch) setCash(cashMatch[1]);
       flash(`זוהה: "${text}"`);
@@ -1275,6 +1275,7 @@ function AdminPermissions({ adminEmails, setAdminEmails, mikvehs, authUser }) {
 
 function StatCard({ label, value, icon: Icon, color = COLORS.teal }) {
   return (
+    <div style={{ background: COLORS.paper, borderRadius: 14, padding: 18, border: `1px solid ${color}22`, flex: 1, minWidth: 150 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, color, marginBottom: 8 }}>
         <Icon size={16} /><span style={{ fontSize: 12.5, fontWeight: 700 }}>{label}</span>
       </div>
