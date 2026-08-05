@@ -1591,14 +1591,14 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
 
       {tab === "mikvehs" && <AdminMikvehs mikvehsCtl={mikvehsCtl} />}
       {needsMikveh && !mikveh && <Empty text="אין עדיין מקוואות במערכת — יש להוסיף מקווה בלשונית 'מקוואות'." />}
-      {tab === "dashboard" && mikveh && <AdminDashboard data={data} />}
-      {tab === "staff" && mikveh && <AdminStaff data={data} mikveh={mikveh} />}
-      {tab === "attendance" && mikveh && <AdminAttendance data={data} />}
-      {tab === "water" && mikveh && <AdminWater data={data} />}
-      {tab === "finance" && mikveh && <AdminFinance data={data} />}
+      {tab === "dashboard" && mikveh && <AdminDashboard key={mikvehId} data={data} />}
+      {tab === "staff" && mikveh && <AdminStaff key={mikvehId} data={data} mikveh={mikveh} />}
+      {tab === "attendance" && mikveh && <AdminAttendance key={mikvehId} data={data} />}
+      {tab === "water" && mikveh && <AdminWater key={mikvehId} data={data} />}
+      {tab === "finance" && mikveh && <AdminFinance key={mikvehId} data={data} />}
       {tab === "dippers-report" && <AdminDippersReport mikvehsCtl={mikvehsCtl} currentMikveh={mikveh} />}
-      {tab === "audit" && mikveh && <AdminAudit data={data} />}
-      {tab === "tickets" && mikveh && <AdminTickets data={data} />}
+      {tab === "audit" && mikveh && <AdminAudit key={mikvehId} data={data} />}
+      {tab === "tickets" && mikveh && <AdminTickets key={mikvehId} data={data} />}
       {tab === "permissions" && <AdminPermissions adminEmails={adminEmails} setAdminEmails={setAdminEmails} mikvehs={mikvehs} authUser={authUser} />}
     </div>
   );
