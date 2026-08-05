@@ -593,7 +593,7 @@ function KioskNotApproved({ email }) {
 function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
   const data = useSystemData(mikveh.id);
   const [current, setCurrent] = useState(null);
-  const [tab, setTab] = useState(personalPhone ? "dippers" : "home");
+  const [tab, setTab] = useState(personalPhone ? "dippers" : "dippers");
   const [toast, setToast] = useState(null);
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2600); };
@@ -615,7 +615,7 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
   const handleLogout = () => {
     if (current) data.addAudit(current.name, "יציאה ממשמרת", "החלפת בלנית");
     setCurrent(null);
-    setTab(personalPhone ? "dippers" : "home");
+    setTab("dippers");
     if (personalPhone) onLeaveDevice(); // signs out of Google entirely
   };
 
@@ -625,7 +625,6 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
   }
 
   const kioskTabs = [
-    { id: "home", label: "בית", icon: Droplets },
     { id: "dippers", label: "טובלות", icon: Wallet },
     { id: "checklist", label: "פתיחה/סגירה", icon: ClipboardList },
     { id: "inventory", label: "מלאי", icon: Package },
@@ -669,9 +668,8 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
         })}
       </div>
 
-      {tab === "home" && <KioskHome data={data} mikveh={mikveh} staffName={current.name} navigate={setTab} flash={flash} />}
+      {tab === "dippers" && <KioskDippersWithStatus data={data} mikveh={mikveh} staffName={current.name} navigate={setTab} flash={flash} />}
       {tab === "checklist" && <KioskChecklist data={data} staffName={current.name} flash={flash} />}
-      {tab === "dippers" && <KioskDippers data={data} staffName={current.name} flash={flash} />}
       {tab === "inventory" && <KioskInventory data={data} staffName={current.name} flash={flash} />}
       {tab === "notes" && <KioskNotes data={data} staffName={current.name} flash={flash} />}
       {tab === "malfunctions" && <KioskMalfunctions data={data} staffName={current.name} flash={flash} />}
@@ -769,6 +767,36 @@ function KioskLogin({ staff, onLogin, mikveh, onLeaveDevice }) {
         </button>
       </div>
     </div>
+  );
+}
+
+function KioskDippersWithStatus({ data, mikveh, navigate, flash, staffName }) {
+  const today = todayStr();
+  const todayRec = data.checklist[today];
+  const statusColor = todayRec?.closed ? "#7a8f8d" : todayRec?.opened ? COLORS.teal : COLORS.red;
+  const statusText = todayRec?.closed ? "משמרת נסגרה" : todayRec?.opened ? "משמרת פתוחה" : "טרם נפתח";
+
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, background: COLORS.paper, borderRadius: 14, padding: "12px 16px", marginBottom: 14, border: `1.5px solid ${statusColor}44` }}>
+        <div style={{ width: 10, height: 10, borderRadius: "50%", background: statusColor, flexShrink: 0 }} />
+        <span style={{ fontWeight: 700, fontSize: 15, color: statusColor }}>{statusText}</span>
+        {!todayRec?.opened && (
+          <button onClick={() => navigate("checklist")} style={{ ...btnPrimary, fontSize: 13, padding: "7px 14px", marginRight: "auto" }}>
+            <Unlock size={14} /> פתיחת משמרת
+          </button>
+        )}
+        {todayRec?.opened && !todayRec?.closed && todayRec?.chlorine && (
+          <span style={{ fontSize: 12.5, color: COLORS.teal, marginRight: "auto" }}>כלור: {todayRec.chlorine} ppm · טמפ׳: {todayRec.temp}°</span>
+        )}
+      </div>
+      {todayRec?.dailyNote && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.goldLight, borderRadius: 12, padding: "10px 14px", marginBottom: 14, fontSize: 13.5 }}>
+          <Bell size={15} color={COLORS.gold} style={{ flexShrink: 0 }} />{todayRec.dailyNote}
+        </div>
+      )}
+      <KioskDippers data={data} staffName={staffName} flash={flash} />
+    </>
   );
 }
 
