@@ -45,6 +45,32 @@ function fmtILS(n) { return `₪${Number(n || 0).toLocaleString("he-IL")}`; }
 function uid() { return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7); }
 
 /* ============================================================
+   URL normalization — converts share links to direct image URLs.
+   Handles Google Drive (both /file/d/ and /open?id= formats),
+   Dropbox, and passes everything else through unchanged.
+   ============================================================ */
+function toDirectImageUrl(url) {
+  if (!url || !url.trim()) return url;
+  const s = url.trim();
+
+  // Google Drive: https://drive.google.com/file/d/FILE_ID/view?...
+  const driveFile = s.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveFile) return `https://drive.google.com/uc?export=view&id=${driveFile[1]}`;
+
+  // Google Drive: https://drive.google.com/open?id=FILE_ID
+  const driveOpen = s.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
+  if (driveOpen) return `https://drive.google.com/uc?export=view&id=${driveOpen[1]}`;
+
+  // Google Drive: already in uc?export format — pass through
+  if (s.includes('drive.google.com/uc')) return s;
+
+  // Dropbox: change dl=0 → raw=1 for direct display
+  if (s.includes('dropbox.com')) return s.replace('dl=0', 'raw=1').replace('www.dropbox.com', 'dl.dropboxusercontent.com');
+
+  return s;
+}
+
+/* ============================================================
    PERSISTENCE — all data is shared: every viewer of this artifact
    (kiosk / admin / public) reads and writes the same records, which
    is what lets the three roles work together as one live system.
@@ -1357,12 +1383,12 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
 
   const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3 });
   useEffect(() => { setForm({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3 }); }, [mikveh.id]);
-  const saveForm = () => mikvehsCtl.updateMikveh(mikveh.id, form);
+  const saveForm = () => mikvehsCtl.updateMikveh(mikveh.id, { ...form, photoUrl: toDirectImageUrl(form.photoUrl) });
 
   const [newPhotoUrl, setNewPhotoUrl] = useState("");
   const addPhoto = () => {
     if (!newPhotoUrl.trim()) return;
-    mikvehsCtl.updateMikveh(mikveh.id, { photos: [...(mikveh.photos || []), newPhotoUrl.trim()] });
+    mikvehsCtl.updateMikveh(mikveh.id, { photos: [...(mikveh.photos || []), toDirectImageUrl(newPhotoUrl.trim())] });
     setNewPhotoUrl("");
   };
   const removePhoto = (idx) => {
@@ -1459,11 +1485,11 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
               </Field>
             </div>
             <div style={{ marginTop: 10 }}>
-              <Field label="תמונה ראשית (קישור URL) — מוצגת בתצוגה המקדימה ובעמוד הציבורי">
-                <input style={inputStyle} value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} placeholder="https://..." />
+              <Field label="תמונה ראשית — הדבקי קישור מ-Google Drive, Dropbox, או כל URL ישיר">
+                <input style={inputStyle} value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} placeholder="https://drive.google.com/file/d/..." />
               </Field>
               {form.photoUrl && (
-                <img src={form.photoUrl} alt="" style={{ marginTop: 8, width: "100%", maxWidth: 260, height: 130, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012" }}
+                <img src={toDirectImageUrl(form.photoUrl)} alt="" style={{ marginTop: 8, width: "100%", maxWidth: 260, height: 130, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012" }}
                   onError={(e) => { e.currentTarget.style.display = "none"; }} />
               )}
             </div>
