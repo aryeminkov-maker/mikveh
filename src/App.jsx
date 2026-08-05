@@ -1819,7 +1819,7 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
                 {mikveh.photos.map((url, i) => (
                   <div key={i} style={{ position: "relative" }}>
-                    <img src={url} alt="" style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012" }}
+                    <img src={url} alt="" style={{ width: 140, height: 110, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012" }}
                       onError={(e) => { e.currentTarget.style.opacity = 0.25; }} />
                     <button onClick={() => removePhoto(i)} style={{
                       position: "absolute", top: -6, left: -6, width: 22, height: 22, borderRadius: "50%", background: COLORS.red, color: "#fff",
@@ -2622,23 +2622,27 @@ function estimateLoad(dippersLog, roomsCount, today) {
 }
 
 function tonightStaff(data, weekday, today) {
-  // Actual logins take priority — merge with scheduled shifts to show hours
-  const actual = data.loginLog.filter((l) => l.ts.slice(0, 10) === today);
-  const scheduled = scheduleShifts(data.defaultSchedule, weekday, today);
+  const todayRec = data.checklist[today];
+  const shiftClosed = !!(todayRec && todayRec.closed);
 
-  if (actual.length) {
-    // For each actual login, find the matching scheduled shift (if any) to show hours
-    const shifts = actual.map((l) => {
-      const match = scheduled.find((s) => {
-        const st = data.staff.find((x) => x.id === s.staffId);
-        return st && st.name === l.staffName;
+  // Only use actual logins when the shift is currently open
+  if (!shiftClosed) {
+    const actual = data.loginLog.filter((l) => l.ts.slice(0, 10) === today);
+    const scheduled = scheduleShifts(data.defaultSchedule, weekday, today);
+    if (actual.length) {
+      const shifts = actual.map((l) => {
+        const match = scheduled.find((s) => {
+          const st = data.staff.find((x) => x.id === s.staffId);
+          return st && st.name === l.staffName;
+        });
+        return { name: l.staffName, start: match?.start || "", end: match?.end || "", isActual: true };
       });
-      return { name: l.staffName, start: match?.start || "", end: match?.end || "", isActual: true };
-    });
-    return { shifts, names: shifts.map((s) => s.name), isActual: true };
+      return { shifts, names: shifts.map((s) => s.name), isActual: true };
+    }
   }
 
-  // No actual logins — use scheduled shifts
+  // Shift closed or no actual login yet — show scheduled/default
+  const scheduled = scheduleShifts(data.defaultSchedule, weekday, today);
   const shifts = scheduled.map((s) => {
     const st = data.staff.find((x) => x.id === s.staffId);
     if (!st) return null;
@@ -2740,36 +2744,69 @@ function PublicMikvehDetail({ mikveh }) {
           <Card title="שעות פתיחה שבועיות" icon={Clock}>
             <Table headers={["יום", "שעות"]} rows={hours.map((d) => [d.day, d.hours])} empty="" />
           </Card>
-          {(mikveh.photos || []).length > 0 && (
-            <Card title="תמונות מהמקווה" icon={Image}>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                {mikveh.photos.map((url, i) => (
-                  <img key={i} src={url} alt="" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012" }}
-                    onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                ))}
-              </div>
-            </Card>
-          )}
-          {mikveh.notes && (
-            <Card title="מידע נוסף מהמקווה" icon={StickyNote}>
-              <p style={{ fontSize: 14, lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap" }}>{mikveh.notes}</p>
-            </Card>
-          )}
-          {(mikveh.accessible || (mikveh.amenities || []).length > 0) && (
-            <Card title="נגישות ומוצרים במקום" icon={Accessibility}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {[
-                  mikveh.accessible ? "מעלון נגיש לבעלות מוגבלות" : null,
-                  ...(mikveh.amenities || []),
-                ].filter(Boolean).map((f, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                    <Check size={16} color={COLORS.aqua} /><span style={{ fontSize: 14 }}>{f}</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
+          {(mikveh.photos || []).length > 0 && <PublicMikvehDetailPhotos photos={mikveh.photos} />}
+          <PublicMikvehDetailExtras mikveh={mikveh} />
         </div>
+      )}
+    </>
+  );
+}
+
+function PhotoGallery({ photos }) {
+  const [selected, setSelected] = useState(null);
+  return (
+    <>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {photos.map((url, i) => (
+          <img key={i} src={url} alt="" onClick={() => setSelected(url)}
+            style={{ width: 160, height: 120, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012", cursor: "zoom-in" }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }} />
+        ))}
+      </div>
+      {selected && (
+        <div onClick={() => setSelected(null)}
+          style={{ position: "fixed", inset: 0, background: "#000000cc", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, cursor: "zoom-out" }}>
+          <img src={selected} alt="" style={{ maxWidth: "90vw", maxHeight: "88vh", borderRadius: 12, boxShadow: "0 8px 40px #000a" }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          <button onClick={() => setSelected(null)} style={{
+            position: "fixed", top: 16, left: 16, background: "#fff2", border: "none", borderRadius: "50%",
+            width: 38, height: 38, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff",
+          }}><X size={20} /></button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function PublicMikvehDetailPhotos({ photos }) {
+  return (
+    <Card title="תמונות מהמקווה" icon={Image}>
+      <PhotoGallery photos={photos} />
+    </Card>
+  );
+}
+
+function PublicMikvehDetailExtras({ mikveh }) {
+  return (
+    <>
+      {mikveh.notes && (
+        <Card title="מידע נוסף מהמקווה" icon={StickyNote}>
+          <p style={{ fontSize: 14, lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap" }}>{mikveh.notes}</p>
+        </Card>
+      )}
+      {(mikveh.accessible || (mikveh.amenities || []).length > 0) && (
+        <Card title="נגישות ומוצרים במקום" icon={Accessibility}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {[
+              mikveh.accessible ? "מעלון נגיש לבעלות מוגבלות" : null,
+              ...(mikveh.amenities || []),
+            ].filter(Boolean).map((f, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <Check size={16} color={COLORS.aqua} /><span style={{ fontSize: 14 }}>{f}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
     </>
   );
