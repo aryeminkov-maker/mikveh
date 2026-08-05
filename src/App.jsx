@@ -64,6 +64,10 @@ function toDirectImageUrl(url) {
   // Google Drive: already in uc?export format — pass through
   if (s.includes('drive.google.com/uc')) return s;
 
+  // Imgur share page: https://imgur.com/XXXXX → https://i.imgur.com/XXXXX.jpeg
+  const imgurPage = s.match(/^https?:\/\/(?:www\.)?imgur\.com\/([a-zA-Z0-9]+)\s*$/);
+  if (imgurPage) return `https://i.imgur.com/${imgurPage[1]}.jpeg`;
+
   // Dropbox: change dl=0 → raw=1 for direct display
   if (s.includes('dropbox.com')) return s.replace('dl=0', 'raw=1').replace('www.dropbox.com', 'dl.dropboxusercontent.com');
 
@@ -589,7 +593,7 @@ function KioskNotApproved({ email }) {
 function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
   const data = useSystemData(mikveh.id);
   const [current, setCurrent] = useState(null);
-  const [tab, setTab] = useState("checklist");
+  const [tab, setTab] = useState(personalPhone ? "dippers" : "home");
   const [toast, setToast] = useState(null);
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2600); };
@@ -611,7 +615,7 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
   const handleLogout = () => {
     if (current) data.addAudit(current.name, "יציאה ממשמרת", "החלפת בלנית");
     setCurrent(null);
-    setTab("checklist");
+    setTab(personalPhone ? "dippers" : "home");
     if (personalPhone) onLeaveDevice(); // signs out of Google entirely
   };
 
@@ -621,10 +625,11 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
   }
 
   const kioskTabs = [
+    { id: "home", label: "בית", icon: Droplets },
+    { id: "dippers", label: "טובלות", icon: Wallet },
     { id: "checklist", label: "פתיחה/סגירה", icon: ClipboardList },
-    { id: "dippers", label: "טובלות ותשלומים", icon: Wallet },
     { id: "inventory", label: "מלאי", icon: Package },
-    { id: "notes", label: "פתקים למשמרת", icon: StickyNote },
+    { id: "notes", label: "פתקים", icon: StickyNote },
     { id: "malfunctions", label: "תקלות", icon: Wrench },
   ];
 
@@ -664,6 +669,7 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
         })}
       </div>
 
+      {tab === "home" && <KioskHome data={data} mikveh={mikveh} staffName={current.name} navigate={setTab} flash={flash} />}
       {tab === "checklist" && <KioskChecklist data={data} staffName={current.name} flash={flash} />}
       {tab === "dippers" && <KioskDippers data={data} staffName={current.name} flash={flash} />}
       {tab === "inventory" && <KioskInventory data={data} staffName={current.name} flash={flash} />}
@@ -766,6 +772,79 @@ function KioskLogin({ staff, onLogin, mikveh, onLeaveDevice }) {
   );
 }
 
+function KioskHome({ data, mikveh, staffName, navigate, flash }) {
+  const today = todayStr();
+  const todayRec = data.checklist[today];
+  const todayEntries = data.dippersLog.filter((e) => e.date === today);
+  const todayCount = todayEntries.length;
+  const pendingCount = todayEntries.filter((e) => e.status === "pending").length;
+  const openTickets = data.malfunctions.filter((m) => m.status !== "טופל").length;
+  const unresolvedNotes = data.notes.filter((n) => !n.resolved).length;
+  const lowStock = Object.values(data.inventory).filter((i) => i.qty <= i.threshold).length;
+
+  const statusColor = todayRec?.closed ? "#7a8f8d" : todayRec?.opened ? COLORS.teal : COLORS.red;
+  const statusText = todayRec?.closed ? "משמרת נסגרה" : todayRec?.opened ? "משמרת פתוחה" : "טרם נפתח";
+
+  const tiles = [
+    { id: "dippers", label: "טובלות", icon: Wallet, badge: todayCount > 0 ? todayCount : null, badgeColor: COLORS.teal, warn: pendingCount > 0, warnText: `${pendingCount} ממתינות לתשלום`, primary: true },
+    { id: "checklist", label: "פתיחה/סגירה", icon: ClipboardList, badge: null },
+    { id: "notes", label: "פתקים", icon: StickyNote, badge: unresolvedNotes || null, badgeColor: COLORS.gold },
+    { id: "malfunctions", label: "תקלות", icon: Wrench, badge: openTickets || null, badgeColor: COLORS.red },
+    { id: "inventory", label: "מלאי", icon: Package, badge: lowStock || null, badgeColor: COLORS.gold, warnText: lowStock ? `${lowStock} פריטים בחוסר` : null },
+  ];
+
+  return (
+    <div>
+      {/* Shift status banner */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, background: COLORS.paper, borderRadius: 14, padding: "14px 18px", marginBottom: 18, border: `1.5px solid ${statusColor}44` }}>
+        <div style={{ width: 12, height: 12, borderRadius: "50%", background: statusColor, flexShrink: 0 }} />
+        <span style={{ fontWeight: 700, fontSize: 15, color: statusColor }}>{statusText}</span>
+        {!todayRec?.opened && (
+          <button onClick={() => navigate("checklist")} style={{ ...btnPrimary, fontSize: 13, padding: "7px 14px", marginRight: "auto" }}>
+            <Unlock size={14} /> פתיחת משמרת
+          </button>
+        )}
+        {todayRec?.opened && !todayRec?.closed && todayRec?.chlorine && (
+          <span style={{ fontSize: 12.5, color: COLORS.teal, marginRight: "auto" }}>כלור: {todayRec.chlorine} ppm · טמפ׳: {todayRec.temp}°</span>
+        )}
+      </div>
+
+      {/* Daily note if exists */}
+      {todayRec?.dailyNote && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.goldLight, borderRadius: 12, padding: "10px 14px", marginBottom: 14, fontSize: 13.5 }}>
+          <Bell size={15} color={COLORS.gold} style={{ flexShrink: 0 }} />
+          {todayRec.dailyNote}
+        </div>
+      )}
+
+      {/* Navigation tiles */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
+        {tiles.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button key={t.id} onClick={() => navigate(t.id)} style={{
+              textAlign: "right", background: t.primary ? COLORS.teal : COLORS.paper, color: t.primary ? "#fff" : COLORS.ink,
+              border: `1.5px solid ${t.primary ? COLORS.teal : COLORS.aqua}33`, borderRadius: 16,
+              padding: 18, cursor: "pointer", position: "relative",
+            }}>
+              {t.badge != null && (
+                <div style={{
+                  position: "absolute", top: 12, left: 12, background: t.badgeColor || COLORS.teal, color: "#fff",
+                  borderRadius: "50%", width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 12, fontWeight: 800,
+                }}>{t.badge}</div>
+              )}
+              <Icon size={28} color={t.primary ? "#fff" : COLORS.teal} style={{ marginBottom: 10 }} />
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{t.label}</div>
+              {t.warnText && <div style={{ fontSize: 11.5, marginTop: 4, color: t.primary ? "#ffffffcc" : COLORS.gold, fontWeight: 600 }}>{t.warnText}</div>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function KioskChecklist({ data, staffName, flash }) {
   const date = todayStr();
   const rec = data.checklist[date] || { chlorine: "", temp: "", showers: false, opened: false, closed: false, openedBy: "", closedBy: "", skipReason: "" };
@@ -859,161 +938,242 @@ function ToggleRow({ label, checked, onChange }) {
   );
 }
 
-function KioskDippers({ data, staffName, flash }) {
-  const [count, setCount] = useState(0);
-  const [cash, setCash] = useState("");
-  const [credit, setCredit] = useState("");
-  const [prepaid, setPrepaid] = useState("");
-  const [billGiven, setBillGiven] = useState("");
-  const [amountDue, setAmountDue] = useState("");
-  const [listening, setListening] = useState(false);
-  const [duration, setDuration] = useState("dip"); // "dip" | "prep"
-  const [payMode, setPayMode] = useState("paid"); // "paid" | "pending"
-  const [pendingType, setPendingType] = useState("later"); // "later" | "exempt"
-  const [tempLabel, setTempLabel] = useState("");
-  const [localLabels, setLocalLabels] = useState({}); // entryId -> nickname — NEVER persisted, lost on refresh, staff convenience only
+const DURATION_OPTIONS = [
+  { id: "dip", label: "רק טבילה", minutes: 20 },
+  { id: "prep", label: "גם התארגנות", minutes: 60 },
+  { id: "bride", label: "כלה", minutes: 120 },
+  { id: "custom", label: "זמן אחר", minutes: null },
+];
+const PAYMENT_STATUS = [
+  { id: "paid-cash", label: "מזומן", color: COLORS.teal },
+  { id: "paid-credit", label: "אשראי", color: COLORS.teal },
+  { id: "paid-prepaid", label: "שולם מראש", color: COLORS.teal },
+  { id: "pending", label: "תשלם בהמשך", color: COLORS.gold },
+  { id: "exempt", label: "כלה — פטורה", color: COLORS.aqua },
+];
 
+function payStatusLabel(entry) {
+  if (entry.status === "exempt") return "כלה — פטורה";
+  if (entry.status === "pending") return "ממתינה לתשלום";
+  if (entry.cash > 0) return `מזומן ${fmtILS(entry.cash)}`;
+  if (entry.credit > 0) return `אשראי ${fmtILS(entry.credit)}`;
+  if (entry.prepaid > 0) return `שולם מראש ${fmtILS(entry.prepaid)}`;
+  return "שולם";
+}
+
+function KioskDippers({ data, staffName, flash }) {
   const today = todayStr();
   const todayEntries = data.dippersLog.filter((e) => e.date === today);
-  const todayTotal = todayEntries.reduce((s, e) => s + e.count, 0);
-  const todayCash = todayEntries.filter((e) => (e.status || "paid") === "paid").reduce((s, e) => s + (e.cash || 0), 0);
-  const pendingEntries = todayEntries.filter((e) => e.status === "pending");
+  const todayCount = todayEntries.reduce((s, e) => s + (e.count || 1), 0);
+  const todayCash = todayEntries.filter((e) => e.cash > 0).reduce((s, e) => s + (e.cash || 0), 0);
+  const todayCredit = todayEntries.filter((e) => e.credit > 0).reduce((s, e) => s + (e.credit || 0), 0);
+  const todayPrepaid = todayEntries.filter((e) => e.prepaid > 0).reduce((s, e) => s + (e.prepaid || 0), 0);
 
-  const change = (parseFloat(billGiven) || 0) - (parseFloat(amountDue) || 0);
+  // Add form state
+  const [dur, setDur] = useState("");
+  const [customMin, setCustomMin] = useState("");
+  const [pay, setPay] = useState("");
+  const [payAmount, setPayAmount] = useState("");
+  const [label, setLabel] = useState("");
+  const [showForm, setShowForm] = useState(false);
 
-  const resetForm = () => {
-    setCount(0); setCash(""); setCredit(""); setPrepaid(""); setPayMode("paid"); setPendingType("later"); setTempLabel(""); setDuration("dip");
-  };
+  const durObj = DURATION_OPTIONS.find((d) => d.id === dur);
+  const canSubmit = dur && pay;
+
+  const resetForm = () => { setDur(""); setCustomMin(""); setPay(""); setPayAmount(""); setLabel(""); setShowForm(false); };
 
   const submitVisit = () => {
-    if (count < 1) { flash("נא לבחור מספר טובלות"); return; }
-    const id = uid();
-    const base = { id, date: today, time: nowTime(), staffName, count, duration };
-    let entry;
-    if (payMode === "paid") {
-      entry = { ...base, status: "paid", cash: parseFloat(cash) || 0, credit: parseFloat(credit) || 0, prepaid: parseFloat(prepaid) || 0 };
-      data.addAudit(staffName, "רישום טובלות ותשלום", `${count} טובלות · מזומן ${fmtILS(entry.cash)} · אשראי ${fmtILS(entry.credit)} · מראש ${fmtILS(entry.prepaid)}`);
-    } else if (pendingType === "exempt") {
-      entry = { ...base, status: "exempt", cash: 0, credit: 0, prepaid: 0 };
-      data.addAudit(staffName, "רישום טובלות — כלה פטורה מתשלום", `${count} טובלות`);
-    } else {
-      entry = { ...base, status: "pending", cash: 0, credit: 0, prepaid: 0 };
-      data.addAudit(staffName, "רישום טובלות — תשלום ממתין", `${count} טובלות · שעת כניסה ${base.time}`);
-      if (tempLabel.trim()) setLocalLabels((prev) => ({ ...prev, [id]: tempLabel.trim() }));
-    }
-    data.setDippersLog((prev) => [entry, ...prev]);
-    flash("נרשם בהצלחה ✓");
-    resetForm();
-  };
-
-  const completePending = (entryId, method, amount) => {
-    data.setDippersLog((prev) => prev.map((e) => e.id === entryId ? { ...e, status: "paid", [method]: (parseFloat(amount) || 0) } : e));
-    data.addAudit(staffName, "השלמת תשלום ממתין", `${fmtILS(amount)} (${method === "cash" ? "מזומן" : method === "credit" ? "אשראי" : "מראש"})`);
-    setLocalLabels((prev) => { const next = { ...prev }; delete next[entryId]; return next; });
-    flash("התשלום הושלם ✓");
-  };
-
-  const depositCash = () => {
-    data.addAudit(staffName, "הפקדת קופה בסוף משמרת", `סה״כ מזומן שהופקד: ${fmtILS(todayCash)}`);
-    flash("הפקדת הקופה נרשמה ✓");
-  };
-
-  const startVoice = () => {
-    const SR = window.webkitSpeechRecognition || window.SpeechRecognition;
-    if (!SR) { flash("זיהוי קולי אינו נתמך בדפדפן זה"); return; }
-    const rec = new SR();
-    rec.lang = "he-IL";
-    rec.onstart = () => setListening(true);
-    rec.onend = () => setListening(false);
-    rec.onerror = () => { setListening(false); flash("לא הצלחתי לשמוע, נסי שוב"); };
-    rec.onresult = (e) => {
-      const text = e.results[0][0].transcript;
-      const numMatch = text.match(/(\d+)\s*טובלות/);
-      const cashMatch = text.match(/(\d+)\s*.{0,3}\s*ח\s*מזומן/) || text.match(/מזומן\s*(\d+)/) || text.match(/(\d+)/);
-      if (numMatch) setCount(parseInt(numMatch[1], 10));
-      if (cashMatch) setCash(cashMatch[1]);
-      flash(`זוהה: "${text}"`);
+    if (!canSubmit) { flash("נא לבחור סוג טבילה ואופן תשלום"); return; }
+    const minutes = dur === "custom" ? (parseInt(customMin, 10) || 30) : durObj.minutes;
+    const amount = parseFloat(payAmount) || 0;
+    const entry = {
+      id: uid(), date: today, time: nowTime(), staffName, count: 1, duration: dur, minutes,
+      status: pay.startsWith("paid") ? "paid" : pay,
+      cash: pay === "paid-cash" ? amount : 0,
+      credit: pay === "paid-credit" ? amount : 0,
+      prepaid: pay === "paid-prepaid" ? amount : 0,
+      tempLabel: label.trim() || "",
     };
-    rec.start();
+    data.setDippersLog((prev) => [entry, ...prev]);
+    data.addAudit(staffName, "רישום טובלת", `${durObj?.label || dur} · ${payStatusLabel(entry)}`);
+    flash("נרשם ✓");
+    resetForm();
   };
 
   return (
     <>
-      <Card title="ספירת טובלות" icon={Users} right={<div style={{ fontSize: 12.5, color: COLORS.teal }}>סה״כ היום: <b>{todayTotal}</b> · מזומן: <b>{fmtILS(todayCash)}</b></div>}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 22, marginBottom: 14 }}>
-          <button onClick={() => setCount((c) => Math.max(0, c - 1))} style={roundBtn}><Minus size={20} /></button>
-          <div style={{ fontSize: 44, fontWeight: 800, minWidth: 70, textAlign: "center", fontFamily: "'Heebo'" }}>{count}</div>
-          <button onClick={() => setCount((c) => c + 1)} style={{ ...roundBtn, background: COLORS.teal, color: "#fff" }}><Plus size={20} /></button>
-        </div>
-        <button onClick={startVoice} style={{ ...btnGhost, margin: "0 auto 16px", display: "flex" }}>
-          <Mic size={16} color={listening ? COLORS.red : COLORS.teal} /> {listening ? "מקשיבה…" : "הזנה קולית"}
-        </button>
-        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-          <button onClick={() => setDuration("dip")} style={{ ...btnBase(duration === "dip" ? COLORS.teal : "#fff", duration === "dip" ? "#fff" : COLORS.ink), fontSize: 13, padding: "9px 14px", border: `1px solid ${COLORS.teal}33` }}>
-            <Timer size={14} /> רק טבילה (~20 ד')
+      <Card title="טובלת חדשה" icon={Plus}>
+        {!showForm ? (
+          <button style={{ ...btnPrimary, width: "100%", justifyContent: "center", fontSize: 16, padding: "14px 0" }} onClick={() => setShowForm(true)}>
+            <Plus size={18} /> הוספת טובלת
           </button>
-          <button onClick={() => setDuration("prep")} style={{ ...btnBase(duration === "prep" ? COLORS.teal : "#fff", duration === "prep" ? "#fff" : COLORS.ink), fontSize: 13, padding: "9px 14px", border: `1px solid ${COLORS.teal}33` }}>
-            <Clock3 size={14} /> גם התארגנות (~60 ד')
-          </button>
-        </div>
-      </Card>
-
-      <Card title="אופן תשלום" icon={Wallet}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          <button onClick={() => setPayMode("paid")} style={{ ...btnBase(payMode === "paid" ? COLORS.teal : "#fff", payMode === "paid" ? "#fff" : COLORS.ink), flex: 1, justifyContent: "center", border: `1px solid ${COLORS.teal}33` }}>שולם עכשיו</button>
-          <button onClick={() => setPayMode("pending")} style={{ ...btnBase(payMode === "pending" ? COLORS.teal : "#fff", payMode === "pending" ? "#fff" : COLORS.ink), flex: 1, justifyContent: "center", border: `1px solid ${COLORS.teal}33` }}>טרם שולם</button>
-        </div>
-
-        {payMode === "paid" ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 14, marginBottom: 16 }}>
-            <Field label="מזומן (₪)"><input value={cash} onChange={(e) => setCash(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-            <Field label="אשראי (₪)"><input value={credit} onChange={(e) => setCredit(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-            <Field label="שולם מראש באתר (₪)"><input value={prepaid} onChange={(e) => setPrepaid(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-          </div>
         ) : (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <button onClick={() => setPendingType("later")} style={{ ...btnGhost, flex: 1, justifyContent: "center", background: pendingType === "later" ? COLORS.aquaLight : "transparent" }}>תשלם בהמשך</button>
-              <button onClick={() => setPendingType("exempt")} style={{ ...btnGhost, flex: 1, justifyContent: "center", background: pendingType === "exempt" ? COLORS.aquaLight : "transparent" }}><Gift size={14} /> כלה — פטורה מתשלום</button>
-            </div>
-            {pendingType === "later" && (
-              <Field label="כינוי לזיהוי זמני (אופציונלי — לא נשמר במערכת, רק לזיכרון שלך במשמרת הזו; אפשר גם להסתמך על שעת הכניסה)">
-                <input value={tempLabel} onChange={(e) => setTempLabel(e.target.value)} style={inputStyle} placeholder='לדוגמה: "האישה עם המעיל האדום"' />
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div>
+              <Field label="סוג טבילה — חובה לבחור">
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                  {DURATION_OPTIONS.map((d) => (
+                    <button key={d.id} onClick={() => setDur(d.id)} style={{
+                      ...btnBase(dur === d.id ? COLORS.teal : "#fff", dur === d.id ? "#fff" : COLORS.ink),
+                      fontSize: 13.5, padding: "10px 14px", border: `1.5px solid ${dur === d.id ? COLORS.teal : "#00000018"}`,
+                      flexShrink: 0,
+                    }}>
+                      {d.id === "dip" && <Timer size={14} />}
+                      {d.id === "prep" && <Clock3 size={14} />}
+                      {d.id === "bride" && <Gift size={14} />}
+                      {d.id === "custom" && <Clock size={14} />}
+                      {d.label}
+                      {d.minutes && <span style={{ opacity: 0.7, fontSize: 11, marginRight: 4 }}>~{d.minutes}′</span>}
+                    </button>
+                  ))}
+                </div>
               </Field>
-            )}
+              {dur === "custom" && (
+                <div style={{ marginTop: 10, maxWidth: 180 }}>
+                  <Field label="זמן משוער (דקות)">
+                    <input type="number" min="5" style={inputStyle} value={customMin} onChange={(e) => setCustomMin(e.target.value)} placeholder="לדוגמה: 45" />
+                  </Field>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <Field label="אופן תשלום — חובה לבחור">
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                  {PAYMENT_STATUS.map((p) => (
+                    <button key={p.id} onClick={() => setPay(p.id)} style={{
+                      ...btnBase(pay === p.id ? p.color : "#fff", pay === p.id ? "#fff" : COLORS.ink),
+                      fontSize: 13, padding: "9px 13px", border: `1.5px solid ${pay === p.id ? p.color : "#00000018"}`,
+                      flexShrink: 0,
+                    }}>{p.label}</button>
+                  ))}
+                </div>
+              </Field>
+              {pay && pay.startsWith("paid") && pay !== "exempt" && (
+                <div style={{ marginTop: 10, maxWidth: 180 }}>
+                  <Field label="סכום (₪)">
+                    <input type="number" min="0" style={inputStyle} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="25" inputMode="decimal" />
+                  </Field>
+                </div>
+              )}
+              {pay === "pending" && (
+                <div style={{ marginTop: 10 }}>
+                  <Field label="כינוי זמני לזיהוי (לא נשמר — רק לנוחיות שלך)">
+                    <input style={inputStyle} value={label} onChange={(e) => setLabel(e.target.value)} placeholder='לדוגמה: "מעיל אדום"' />
+                  </Field>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button style={{ ...btnPrimary, opacity: canSubmit ? 1 : 0.45 }} onClick={submitVisit} disabled={!canSubmit}>
+                <Check size={16} /> רישום טובלת
+              </button>
+              <button style={btnGhost} onClick={resetForm}>ביטול</button>
+            </div>
           </div>
         )}
-        <button style={btnPrimary} onClick={submitVisit}><Check size={16} /> רישום ביקור</button>
       </Card>
 
-      {pendingEntries.length > 0 && (
-        <Card title="ממתינות לתשלום" icon={Clock3}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {pendingEntries.map((e) => (
-              <PendingRow key={e.id} entry={e} label={localLabels[e.id]} onComplete={completePending} />
+      {todayEntries.length > 0 && (
+        <Card title={`טובלות במשמרת (${todayCount})`} icon={Users}
+          right={
+            <div style={{ fontSize: 12, color: COLORS.teal, textAlign: "left" }}>
+              {todayCash > 0 && <div>מזומן: <b>{fmtILS(todayCash)}</b></div>}
+              {todayCredit > 0 && <div>אשראי: <b>{fmtILS(todayCredit)}</b></div>}
+              {todayPrepaid > 0 && <div>מראש: <b>{fmtILS(todayPrepaid)}</b></div>}
+            </div>
+          }>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {todayEntries.map((e) => (
+              <DipperRow key={e.id} entry={e} data={data} staffName={staffName} flash={flash} />
             ))}
           </div>
         </Card>
       )}
-
-      <Card title="מחשבון עודף" icon={Wallet}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 14, marginBottom: 12 }}>
-          <Field label="סכום לתשלום (₪)"><input value={amountDue} onChange={(e) => setAmountDue(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-          <Field label="שטר/סכום שהתקבל (₪)"><input value={billGiven} onChange={(e) => setBillGiven(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-        </div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: change < 0 ? COLORS.red : COLORS.teal }}>
-          עודף להחזרה: {fmtILS(Math.max(0, change))}
-        </div>
-      </Card>
-
-      <Card title="הפקדת קופה" icon={Wallet}>
-        <p style={{ fontSize: 13.5, color: "#3a5250", marginTop: 0 }}>סגירת יום קופה — מסכם ורושם ביומן השינויים את סך המזומן שנאסף היום.</p>
-        <button style={btnGold} onClick={depositCash}><FileSpreadsheet size={16} /> רישום הפקדת קופה ({fmtILS(todayCash)})</button>
-      </Card>
     </>
   );
 }
 const roundBtn = { width: 52, height: 52, borderRadius: "50%", border: "none", background: "#fff", boxShadow: "0 1px 4px #00000022", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" };
+
+function DipperRow({ entry, data, staffName, flash }) {
+  const [editing, setEditing] = useState(false);
+  const [pay, setPay] = useState(
+    entry.status === "exempt" ? "exempt"
+    : entry.status === "pending" ? "pending"
+    : entry.cash > 0 ? "paid-cash"
+    : entry.credit > 0 ? "paid-credit"
+    : entry.prepaid > 0 ? "paid-prepaid"
+    : "paid-cash"
+  );
+  const [payAmount, setPayAmount] = useState(String(entry.cash || entry.credit || entry.prepaid || ""));
+  const [dur, setDur] = useState(entry.duration || "dip");
+
+  const durLabel = DURATION_OPTIONS.find((d) => d.id === dur)?.label || dur;
+  const statusColor = entry.status === "pending" ? COLORS.gold : entry.status === "exempt" ? COLORS.aqua : COLORS.teal;
+
+  const save = () => {
+    const amount = parseFloat(payAmount) || 0;
+    const patch = {
+      duration: dur,
+      status: pay.startsWith("paid") ? "paid" : pay,
+      cash: pay === "paid-cash" ? amount : 0,
+      credit: pay === "paid-credit" ? amount : 0,
+      prepaid: pay === "paid-prepaid" ? amount : 0,
+    };
+    data.setDippersLog((prev) => prev.map((e) => e.id === entry.id ? { ...e, ...patch } : e));
+    data.addAudit(staffName, "עריכת רשומת טובלת", `שעה ${entry.time} → ${payStatusLabel({ ...entry, ...patch })}`);
+    flash("עודכן ✓");
+    setEditing(false);
+  };
+
+  return (
+    <div style={{ background: COLORS.paper, borderRadius: 11, border: `1px solid ${statusColor}33`, padding: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <span style={{ fontWeight: 700, fontSize: 13.5 }}>{entry.time}</span>
+          <span style={{ fontSize: 12.5, color: "#7a8f8d", marginRight: 8 }}>· {durLabel}{entry.tempLabel ? ` · ${entry.tempLabel}` : ""}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: statusColor }}>{payStatusLabel(entry)}</span>
+          <button onClick={() => setEditing((x) => !x)} style={{ ...btnGhost, padding: "4px 10px", fontSize: 11.5 }}>
+            {editing ? "סגירה" : "עריכה"}
+          </button>
+        </div>
+      </div>
+      {editing && (
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+          <Field label="סוג טבילה">
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {DURATION_OPTIONS.filter((d) => d.id !== "custom").map((d) => (
+                <button key={d.id} onClick={() => setDur(d.id)} style={{ ...btnBase(dur === d.id ? COLORS.teal : "#fff", dur === d.id ? "#fff" : COLORS.ink), fontSize: 12, padding: "6px 10px", border: `1px solid ${dur === d.id ? COLORS.teal : "#00000018"}` }}>
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          </Field>
+          <Field label="תשלום">
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {PAYMENT_STATUS.map((p) => (
+                <button key={p.id} onClick={() => setPay(p.id)} style={{ ...btnBase(pay === p.id ? p.color : "#fff", pay === p.id ? "#fff" : COLORS.ink), fontSize: 12, padding: "6px 10px", border: `1px solid ${pay === p.id ? p.color : "#00000018"}` }}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </Field>
+          {pay && pay.startsWith("paid") && (
+            <div style={{ maxWidth: 150 }}>
+              <Field label="סכום (₪)">
+                <input type="number" style={inputStyle} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} inputMode="decimal" />
+              </Field>
+            </div>
+          )}
+          <button style={btnPrimary} onClick={save}><Check size={14} /> שמירה</button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PendingRow({ entry, label, onComplete }) {
   const [open, setOpen] = useState(false);
@@ -1112,44 +1272,99 @@ function KioskNotes({ data, staffName, flash }) {
   );
 }
 
+const MALFUNCTION_TYPES = [
+  "תחזוקה שוטפת וניקיון",
+  "תיקון תקלות",
+  "אחר",
+];
+
 function KioskMalfunctions({ data, staffName, flash }) {
   const [desc, setDesc] = useState("");
-  const [category, setCategory] = useState("תחזוקה כללית");
+  const [category, setCategory] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [editDesc, setEditDesc] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+
   const submit = () => {
-    if (!desc.trim()) return;
+    if (!desc.trim() || !category) { flash("נא לבחור סוג ולתאר את הקריאה"); return; }
     data.setMalfunctions((prev) => [{ id: uid(), date: todayStr(), staffName, category, description: desc.trim(), status: "פתוח", ts: new Date().toISOString() }, ...prev]);
     data.addAudit(staffName, "פתיחת קריאת תקלה", `${category}: ${desc.trim().slice(0, 60)}`);
-    setDesc("");
-    flash("הקריאה נשלחה לאגף התפעול ✓");
+    setDesc(""); setCategory("");
+    flash("הקריאה נשלחה ✓");
   };
-  const mine = data.malfunctions.slice(0, 8);
+
+  const startEdit = (m) => { setEditId(m.id); setEditDesc(m.description); setEditCategory(m.category); };
+  const saveEdit = () => {
+    data.setMalfunctions((prev) => prev.map((m) => m.id === editId ? { ...m, description: editDesc.trim(), category: editCategory } : m));
+    data.addAudit(staffName, "עריכת קריאת תקלה", editDesc.trim().slice(0, 60));
+    setEditId(null);
+    flash("עודכן ✓");
+  };
+  const deleteEntry = (id) => {
+    data.setMalfunctions((prev) => prev.filter((m) => m.id !== id));
+    data.addAudit(staffName, "מחיקת קריאת תקלה", "");
+    flash("נמחק ✓");
+  };
+
   const statusColor = { "פתוח": COLORS.red, "בטיפול": COLORS.gold, "טופל": COLORS.aqua };
 
   return (
     <Card title="דיווח תקלות וקריאות שירות" icon={Wrench}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-        <Field label="קטגוריה">
-          <select value={category} onChange={(e) => setCategory(e.target.value)} style={inputStyle}>
-            {["תחזוקה כללית", "אינסטלציה", "חשמל", "ניקיון", "מלאי", "אחר"].map((c) => <option key={c}>{c}</option>)}
-          </select>
+      <div style={{ marginBottom: 12 }}>
+        <Field label="סוג קריאה">
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+            {MALFUNCTION_TYPES.map((c) => (
+              <button key={c} onClick={() => setCategory(c)} style={{
+                ...btnBase(category === c ? COLORS.teal : "#fff", category === c ? "#fff" : COLORS.ink),
+                fontSize: 13.5, padding: "9px 14px", border: `1.5px solid ${category === c ? COLORS.teal : "#00000018"}`,
+              }}>{c}</button>
+            ))}
+          </div>
         </Field>
-        <Field label="תיאור התקלה">
-          <input value={desc} onChange={(e) => setDesc(e.target.value)} style={inputStyle} placeholder="תארי את התקלה בקצרה" />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <Field label="תיאור">
+          <input value={desc} onChange={(e) => setDesc(e.target.value)} style={inputStyle} placeholder="תארי את הבעיה בקצרה" />
         </Field>
       </div>
       <button style={btnPrimary} onClick={submit}><Wrench size={16} /> פתיחת קריאה</button>
 
       <div style={{ marginTop: 20, borderTop: "1px solid #00000012", paddingTop: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.teal, marginBottom: 10 }}>קריאות אחרונות מהמקווה</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {mine.length === 0 && <Empty text="אין קריאות פתוחות." />}
-          {mine.map((m) => (
-            <div key={m.id} style={{ display: "flex", justifyContent: "space-between", padding: 11, borderRadius: 10, background: "#fff", border: "1px solid #00000010" }}>
-              <div>
-                <div style={{ fontSize: 13.5, fontWeight: 600 }}>{m.category} — {m.description}</div>
-                <div style={{ fontSize: 11.5, color: "#3a5250" }}>{m.staffName} · {fmtDate(m.date)}</div>
-              </div>
-              <span style={{ fontSize: 12, fontWeight: 700, color: statusColor[m.status], alignSelf: "center" }}>{m.status}</span>
+        <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.teal, marginBottom: 10 }}>קריאות מהמקווה</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {data.malfunctions.length === 0 && <Empty text="אין קריאות." />}
+          {data.malfunctions.map((m) => (
+            <div key={m.id} style={{ borderRadius: 11, border: "1px solid #00000012", background: "#fff", overflow: "hidden" }}>
+              {editId === m.id ? (
+                <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <Field label="סוג">
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {MALFUNCTION_TYPES.map((c) => (
+                        <button key={c} onClick={() => setEditCategory(c)} style={{ ...btnBase(editCategory === c ? COLORS.teal : "#fff", editCategory === c ? "#fff" : COLORS.ink), fontSize: 12.5, padding: "7px 11px", border: `1px solid ${editCategory === c ? COLORS.teal : "#00000018"}` }}>{c}</button>
+                      ))}
+                    </div>
+                  </Field>
+                  <Field label="תיאור"><input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} style={inputStyle} /></Field>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button style={btnPrimary} onClick={saveEdit}><Check size={14} /> שמירה</button>
+                    <button style={btnGhost} onClick={() => setEditId(null)}>ביטול</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: 11, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{m.category} — {m.description}</div>
+                    <div style={{ fontSize: 11.5, color: "#3a5250" }}>{m.staffName} · {fmtDate(m.date)}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: statusColor[m.status] }}>{m.status}</span>
+                    <button onClick={() => startEdit(m)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5 }}>עריכה</button>
+                    <button onClick={() => { if (window.confirm("למחוק את הקריאה?")) deleteEntry(m.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}>
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
