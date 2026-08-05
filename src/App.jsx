@@ -12,6 +12,7 @@ import {
   PhoneCall, Clock, MapPin, Accessibility, CalendarCheck, ShieldAlert,
   Thermometer, TrendingUp, Download, RefreshCw, Building2, ShieldCheck,
   Link2, Copy, Tablet, Smartphone, Settings, Trash2, KeyRound, Loader2, Navigation,
+  Bell, Info, Bath, Timer, Gift, Clock3,
   Image, ImagePlus, ArrowRight
 } from "lucide-react";
 
@@ -20,16 +21,16 @@ import {
    grounded in water + tradition, avoiding cliché AI defaults.
    ============================================================ */
 const COLORS = {
-  ink: "#0F3230",
-  teal: "#175651",
-  aqua: "#3F8C86",
-  aquaLight: "#DCEEEC",
-  seafoam: "#F2F7F6",
+  ink: "#0B3A52",
+  teal: "#12628A",
+  aqua: "#33A9CE",
+  aquaLight: "#DCF1F9",
+  seafoam: "#EEF7FB",
   gold: "#C79A3E",
   goldLight: "#F6EBD2",
   red: "#B3463A",
   redLight: "#F8E4E1",
-  paper: "#FBFAF7",
+  paper: "#FBFDFE",
 };
 
 const WEEKDAYS_HE = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
@@ -104,7 +105,7 @@ const OPENING_HOURS = [
 ];
 
 const DEFAULT_MIKVEHS = [
-  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
+  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
 ];
 
 /* ============================================================
@@ -145,7 +146,7 @@ function useMikvehs() {
   const [list, setList] = useShared("mikvehs", DEFAULT_MIKVEHS);
 
   const addMikveh = useCallback((name, address) => {
-    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
+    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
   }, [setList]);
 
   const updateMikveh = useCallback((id, patch) => {
@@ -225,7 +226,7 @@ export default function MikvehSystem() {
         {topRoute === "public" && <PublicApp mikvehs={mikvehs.list} />}
       </div>
       <footer style={{ textAlign: "center", padding: "18px 8px", fontSize: 12.5, color: COLORS.teal, opacity: 0.65 }}>
-        רשת המקוואות · הנתונים משותפים בין כל מי שפותח את המסמך הזה
+        מקוואות בית אל · הנתונים משותפים בין כל מי שפותח את המסמך הזה
       </footer>
     </div>
   );
@@ -262,7 +263,6 @@ function WaveDivider({ color = COLORS.aqua, opacity = 0.35 }) {
 
 function TopBar({ route, navigate }) {
   const tabs = [
-    { id: "public", label: "ממשק ציבורי", icon: Users },
     { id: "kiosk", label: "התחברות לבלניות", icon: Droplets },
     { id: "admin", label: "ניהול ובקרה", icon: ClipboardList },
   ];
@@ -270,10 +270,8 @@ function TopBar({ route, navigate }) {
     <div style={{ background: COLORS.teal }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "14px 16px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <button onClick={() => navigate("public")} style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", cursor: "pointer" }}>
-          <div style={{ width: 34, height: 34, borderRadius: 9, background: COLORS.gold, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Droplets size={19} color={COLORS.ink} />
-          </div>
-          <span className="font-display" style={{ color: "#fff", fontWeight: 800, fontSize: 19 }}>רשת המקוואות</span>
+          <img src={`${import.meta.env.BASE_URL}logo.png`} alt="לוגו המועצה" style={{ height: 38, width: "auto", display: "block" }} />
+          <span className="font-display" style={{ color: "#fff", fontWeight: 800, fontSize: 19 }}>מקוואות בית אל</span>
         </button>
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", background: "#ffffff17", padding: 4, borderRadius: 12 }}>
           {tabs.map((t) => {
@@ -744,16 +742,23 @@ function KioskLogin({ staff, onLogin, mikveh, onLeaveDevice }) {
 
 function KioskChecklist({ data, staffName, flash }) {
   const date = todayStr();
-  const rec = data.checklist[date] || { chlorine: "", temp: "", showers: false, suppliesOk: false, opened: false, closed: false, openedBy: "", closedBy: "" };
+  const rec = data.checklist[date] || { chlorine: "", temp: "", showers: false, opened: false, closed: false, openedBy: "", closedBy: "", skipReason: "" };
 
   const update = (patch) => {
     data.setChecklist((prev) => ({ ...prev, [date]: { ...rec, ...patch } }));
   };
 
+  const missingMeasurement = !rec.chlorine || !rec.temp;
+
   const confirmOpen = () => {
-    if (!rec.chlorine || !rec.temp) { flash("נא למלא כלור וטמפרטורה לפני אישור פתיחה"); return; }
+    if (missingMeasurement && !rec.skipReason?.trim()) {
+      flash("נא למלא כלור וטמפרטורה, או להסביר בהערה למה לא נמדדו");
+      return;
+    }
     update({ opened: true, openedBy: staffName, openedAt: new Date().toISOString() });
-    data.addAudit(staffName, "אישור פתיחת משמרת", `כלור: ${rec.chlorine} ppm · טמפ׳: ${rec.temp}°`);
+    data.addAudit(staffName, "אישור פתיחת משמרת", missingMeasurement
+      ? `נפתח ללא מדידת מים — סיבה: ${rec.skipReason}`
+      : `כלור: ${rec.chlorine} ppm · טמפ׳: ${rec.temp}°`);
     flash("משמרת נפתחה ✓");
   };
   const confirmClose = () => {
@@ -778,12 +783,25 @@ function KioskChecklist({ data, staffName, flash }) {
         </Field>
       </div>
 
+      {missingMeasurement && (
+        <div style={{ marginBottom: 16 }}>
+          <Field label="לא נמדד כלור/טמפרטורה? נא להסביר למה (יתועד ביומן השינויים)">
+            <textarea value={rec.skipReason || ""} onChange={(e) => update({ skipReason: e.target.value })} style={{ ...inputStyle, minHeight: 56, resize: "vertical" }} placeholder='לדוגמה: "ערכת הבדיקה נגמרה, הוזמנה חדשה"' />
+          </Field>
+        </div>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
         <ToggleRow label="מקלחות ותאי הכנה תקינים" checked={rec.showers} onChange={(v) => update({ showers: v })} />
-        <ToggleRow label="מלאי וציוד מולאו" checked={rec.suppliesOk} onChange={(v) => update({ suppliesOk: v })} />
       </div>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <div style={{ marginBottom: 4 }}>
+        <Field label="הודעה חד-פעמית להיום (תוצג לתושבות בדף הבית, נמחקת אוטומטית מחר)">
+          <input value={rec.dailyNote || ""} onChange={(e) => update({ dailyNote: e.target.value })} style={inputStyle} placeholder='לדוגמה: "היום נסגר שעה מוקדם יותר"' />
+        </Field>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
         <button style={{ ...btnPrimary, opacity: rec.opened ? 0.55 : 1 }} onClick={confirmOpen} disabled={rec.opened}>
           <Unlock size={16} /> {rec.opened ? `נפתח ע״י ${rec.openedBy}` : "אישור פתיחת משמרת"}
         </button>
@@ -823,20 +841,50 @@ function KioskDippers({ data, staffName, flash }) {
   const [billGiven, setBillGiven] = useState("");
   const [amountDue, setAmountDue] = useState("");
   const [listening, setListening] = useState(false);
+  const [duration, setDuration] = useState("dip"); // "dip" | "prep"
+  const [payMode, setPayMode] = useState("paid"); // "paid" | "pending"
+  const [pendingType, setPendingType] = useState("later"); // "later" | "exempt"
+  const [tempLabel, setTempLabel] = useState("");
+  const [localLabels, setLocalLabels] = useState({}); // entryId -> nickname — NEVER persisted, lost on refresh, staff convenience only
 
-  const todayEntries = data.dippersLog.filter((e) => e.date === todayStr());
+  const today = todayStr();
+  const todayEntries = data.dippersLog.filter((e) => e.date === today);
   const todayTotal = todayEntries.reduce((s, e) => s + e.count, 0);
-  const todayCash = todayEntries.reduce((s, e) => s + (e.cash || 0), 0);
+  const todayCash = todayEntries.filter((e) => (e.status || "paid") === "paid").reduce((s, e) => s + (e.cash || 0), 0);
+  const pendingEntries = todayEntries.filter((e) => e.status === "pending");
 
   const change = (parseFloat(billGiven) || 0) - (parseFloat(amountDue) || 0);
 
+  const resetForm = () => {
+    setCount(0); setCash(""); setCredit(""); setPrepaid(""); setPayMode("paid"); setPendingType("later"); setTempLabel(""); setDuration("dip");
+  };
+
   const submitVisit = () => {
     if (count < 1) { flash("נא לבחור מספר טובלות"); return; }
-    const entry = { id: uid(), date: todayStr(), time: nowTime(), staffName, count, cash: parseFloat(cash) || 0, credit: parseFloat(credit) || 0, prepaid: parseFloat(prepaid) || 0 };
+    const id = uid();
+    const base = { id, date: today, time: nowTime(), staffName, count, duration };
+    let entry;
+    if (payMode === "paid") {
+      entry = { ...base, status: "paid", cash: parseFloat(cash) || 0, credit: parseFloat(credit) || 0, prepaid: parseFloat(prepaid) || 0 };
+      data.addAudit(staffName, "רישום טובלות ותשלום", `${count} טובלות · מזומן ${fmtILS(entry.cash)} · אשראי ${fmtILS(entry.credit)} · מראש ${fmtILS(entry.prepaid)}`);
+    } else if (pendingType === "exempt") {
+      entry = { ...base, status: "exempt", cash: 0, credit: 0, prepaid: 0 };
+      data.addAudit(staffName, "רישום טובלות — כלה פטורה מתשלום", `${count} טובלות`);
+    } else {
+      entry = { ...base, status: "pending", cash: 0, credit: 0, prepaid: 0 };
+      data.addAudit(staffName, "רישום טובלות — תשלום ממתין", `${count} טובלות · שעת כניסה ${base.time}`);
+      if (tempLabel.trim()) setLocalLabels((prev) => ({ ...prev, [id]: tempLabel.trim() }));
+    }
     data.setDippersLog((prev) => [entry, ...prev]);
-    data.addAudit(staffName, "רישום טובלות ותשלום", `${count} טובלות · מזומן ${fmtILS(entry.cash)} · אשראי ${fmtILS(entry.credit)} · מראש ${fmtILS(entry.prepaid)}`);
     flash("נרשם בהצלחה ✓");
-    setCount(0); setCash(""); setCredit(""); setPrepaid("");
+    resetForm();
+  };
+
+  const completePending = (entryId, method, amount) => {
+    data.setDippersLog((prev) => prev.map((e) => e.id === entryId ? { ...e, status: "paid", [method]: (parseFloat(amount) || 0) } : e));
+    data.addAudit(staffName, "השלמת תשלום ממתין", `${fmtILS(amount)} (${method === "cash" ? "מזומן" : method === "credit" ? "אשראי" : "מראש"})`);
+    setLocalLabels((prev) => { const next = { ...prev }; delete next[entryId]; return next; });
+    flash("התשלום הושלם ✓");
   };
 
   const depositCash = () => {
@@ -866,24 +914,61 @@ function KioskDippers({ data, staffName, flash }) {
   return (
     <>
       <Card title="ספירת טובלות" icon={Users} right={<div style={{ fontSize: 12.5, color: COLORS.teal }}>סה״כ היום: <b>{todayTotal}</b> · מזומן: <b>{fmtILS(todayCash)}</b></div>}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 22, marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 22, marginBottom: 14 }}>
           <button onClick={() => setCount((c) => Math.max(0, c - 1))} style={roundBtn}><Minus size={20} /></button>
           <div style={{ fontSize: 44, fontWeight: 800, minWidth: 70, textAlign: "center", fontFamily: "'Heebo'" }}>{count}</div>
           <button onClick={() => setCount((c) => c + 1)} style={{ ...roundBtn, background: COLORS.teal, color: "#fff" }}><Plus size={20} /></button>
         </div>
-        <button onClick={startVoice} style={{ ...btnGhost, margin: "0 auto", display: "flex" }}>
+        <button onClick={startVoice} style={{ ...btnGhost, margin: "0 auto 16px", display: "flex" }}>
           <Mic size={16} color={listening ? COLORS.red : COLORS.teal} /> {listening ? "מקשיבה…" : "הזנה קולית"}
         </button>
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+          <button onClick={() => setDuration("dip")} style={{ ...btnBase(duration === "dip" ? COLORS.teal : "#fff", duration === "dip" ? "#fff" : COLORS.ink), fontSize: 13, padding: "9px 14px", border: `1px solid ${COLORS.teal}33` }}>
+            <Timer size={14} /> רק טבילה (~20 ד')
+          </button>
+          <button onClick={() => setDuration("prep")} style={{ ...btnBase(duration === "prep" ? COLORS.teal : "#fff", duration === "prep" ? "#fff" : COLORS.ink), fontSize: 13, padding: "9px 14px", border: `1px solid ${COLORS.teal}33` }}>
+            <Clock3 size={14} /> גם התארגנות (~60 ד')
+          </button>
+        </div>
       </Card>
 
-      <Card title="פילוח תשלום" icon={Wallet}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 14, marginBottom: 16 }}>
-          <Field label="מזומן (₪)"><input value={cash} onChange={(e) => setCash(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-          <Field label="אשראי (₪)"><input value={credit} onChange={(e) => setCredit(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-          <Field label="שולם מראש באתר (₪)"><input value={prepaid} onChange={(e) => setPrepaid(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
+      <Card title="אופן תשלום" icon={Wallet}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <button onClick={() => setPayMode("paid")} style={{ ...btnBase(payMode === "paid" ? COLORS.teal : "#fff", payMode === "paid" ? "#fff" : COLORS.ink), flex: 1, justifyContent: "center", border: `1px solid ${COLORS.teal}33` }}>שולם עכשיו</button>
+          <button onClick={() => setPayMode("pending")} style={{ ...btnBase(payMode === "pending" ? COLORS.teal : "#fff", payMode === "pending" ? "#fff" : COLORS.ink), flex: 1, justifyContent: "center", border: `1px solid ${COLORS.teal}33` }}>טרם שולם</button>
         </div>
+
+        {payMode === "paid" ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 14, marginBottom: 16 }}>
+            <Field label="מזומן (₪)"><input value={cash} onChange={(e) => setCash(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
+            <Field label="אשראי (₪)"><input value={credit} onChange={(e) => setCredit(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
+            <Field label="שולם מראש באתר (₪)"><input value={prepaid} onChange={(e) => setPrepaid(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
+          </div>
+        ) : (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button onClick={() => setPendingType("later")} style={{ ...btnGhost, flex: 1, justifyContent: "center", background: pendingType === "later" ? COLORS.aquaLight : "transparent" }}>תשלם בהמשך</button>
+              <button onClick={() => setPendingType("exempt")} style={{ ...btnGhost, flex: 1, justifyContent: "center", background: pendingType === "exempt" ? COLORS.aquaLight : "transparent" }}><Gift size={14} /> כלה — פטורה מתשלום</button>
+            </div>
+            {pendingType === "later" && (
+              <Field label="כינוי לזיהוי זמני (אופציונלי — לא נשמר במערכת, רק לזיכרון שלך במשמרת הזו; אפשר גם להסתמך על שעת הכניסה)">
+                <input value={tempLabel} onChange={(e) => setTempLabel(e.target.value)} style={inputStyle} placeholder='לדוגמה: "האישה עם המעיל האדום"' />
+              </Field>
+            )}
+          </div>
+        )}
         <button style={btnPrimary} onClick={submitVisit}><Check size={16} /> רישום ביקור</button>
       </Card>
+
+      {pendingEntries.length > 0 && (
+        <Card title="ממתינות לתשלום" icon={Clock3}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {pendingEntries.map((e) => (
+              <PendingRow key={e.id} entry={e} label={localLabels[e.id]} onComplete={completePending} />
+            ))}
+          </div>
+        </Card>
+      )}
 
       <Card title="מחשבון עודף" icon={Wallet}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 14, marginBottom: 12 }}>
@@ -903,6 +988,33 @@ function KioskDippers({ data, staffName, flash }) {
   );
 }
 const roundBtn = { width: 52, height: 52, borderRadius: "50%", border: "none", background: "#fff", boxShadow: "0 1px 4px #00000022", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" };
+
+function PendingRow({ entry, label, onComplete }) {
+  const [open, setOpen] = useState(false);
+  const [method, setMethod] = useState("cash");
+  const [amount, setAmount] = useState("");
+  return (
+    <div style={{ background: COLORS.goldLight, borderRadius: 11, padding: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontSize: 13.5 }}>
+          <b>{entry.count}</b> טובלות · נכנסה בשעה <b>{entry.time}</b>{label && <> · <span style={{ color: "#7a6020" }}>{label}</span></>}
+        </div>
+        <button onClick={() => setOpen((o) => !o)} style={{ ...btnGhost, padding: "6px 12px", fontSize: 12.5 }}>{open ? "סגירה" : "השלמת תשלום"}</button>
+      </div>
+      {open && (
+        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <select value={method} onChange={(e) => setMethod(e.target.value)} style={{ ...inputStyle, width: "auto" }}>
+            <option value="cash">מזומן</option>
+            <option value="credit">אשראי</option>
+            <option value="prepaid">שולם מראש</option>
+          </select>
+          <input value={amount} onChange={(e) => setAmount(e.target.value)} style={{ ...inputStyle, width: 110 }} inputMode="decimal" placeholder="סכום ₪" />
+          <button style={btnPrimary} onClick={() => { onComplete(entry.id, method, amount); setOpen(false); setAmount(""); }}><Check size={15} /> אישור</button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function KioskInventory({ data, staffName, flash }) {
   const inv = data.inventory;
@@ -1243,8 +1355,8 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
 
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
 
-  const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "" });
-  useEffect(() => { setForm({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "" }); }, [mikveh.id]);
+  const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3 });
+  useEffect(() => { setForm({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3 }); }, [mikveh.id]);
   const saveForm = () => mikvehsCtl.updateMikveh(mikveh.id, form);
 
   const [newPhotoUrl, setNewPhotoUrl] = useState("");
@@ -1333,9 +1445,19 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
               <Field label="כתובת"><input style={inputStyle} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
               <Field label="טלפון"><input style={inputStyle} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
             </div>
-            <Field label="הערות נוספות (יוצגו לתושבות בממשק הציבורי)">
+            <Field label="הערות נוספות (יוצגו לתושבות בממשק הציבורי, בתוך 'עוד פרטים')">
               <textarea style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </Field>
+            <div style={{ marginTop: 10 }}>
+              <Field label="הודעה קבועה לדף הבית (מוצגת תמיד, בבירור, בשורת המקווה)">
+                <input style={inputStyle} value={form.pinnedNote} onChange={(e) => setForm({ ...form, pinnedNote: e.target.value })} placeholder='לדוגמה: "בשיפוצים — ייתכנו שינויים בשעות"' />
+              </Field>
+            </div>
+            <div style={{ marginTop: 10, maxWidth: 220 }}>
+              <Field label="מספר חדרי אמבטיה/הכנה במקווה (לחישוב עומס)">
+                <input type="number" min="1" style={inputStyle} value={form.roomsCount} onChange={(e) => setForm({ ...form, roomsCount: Math.max(1, parseInt(e.target.value, 10) || 1) })} />
+              </Field>
+            </div>
             <div style={{ marginTop: 10 }}>
               <Field label="תמונה ראשית (קישור URL) — מוצגת בתצוגה המקדימה ובעמוד הציבורי">
                 <input style={inputStyle} value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} placeholder="https://..." />
@@ -1826,6 +1948,22 @@ function scheduleShifts(defaultSchedule, weekday) {
   return [{ staffId: v, start: "", end: "" }]; // backward-compat: older version stored a single staff id per day
 }
 
+function estimateLoad(dippersLog, roomsCount, today) {
+  const now = new Date();
+  const active = dippersLog.filter((e) => {
+    if (e.date !== today || !e.time) return false;
+    const parts = e.time.split(":").map(Number);
+    if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) return false;
+    const start = new Date(now); start.setHours(parts[0], parts[1], 0, 0);
+    const durationMin = e.duration === "prep" ? 60 : 20;
+    const end = new Date(start.getTime() + durationMin * 60000);
+    return now >= start && now < end;
+  });
+  const occupied = active.reduce((s, e) => s + (e.count || 1), 0);
+  const rooms = roomsCount || 1;
+  return { occupied, rooms, busy: occupied / rooms >= 0.8 };
+}
+
 function tonightStaff(data, weekday, today) {
   const actual = data.loginLog.filter((l) => l.ts.slice(0, 10) === today);
   if (actual.length) return { names: actual.map((l) => l.staffName), isActual: true };
@@ -1848,6 +1986,8 @@ function PublicMikvehDetail({ mikveh }) {
   const [expanded, setExpanded] = useState(false);
 
   const { names: tonightNames } = tonightStaff(data, weekday, today);
+  const load = estimateLoad(data.dippersLog, mikveh.roomsCount, today);
+  const todayRec = data.checklist[today];
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
 
   return (
@@ -1861,13 +2001,32 @@ function PublicMikvehDetail({ mikveh }) {
           <WaveDivider color="#fff" opacity={1} />
         </div>
         <div style={{ position: "relative", zIndex: 1 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
             <span style={{ width: 10, height: 10, borderRadius: "50%", background: isOpenDay ? "#8CE0B0" : "#EFA6A0" }} />
             <span style={{ fontWeight: 700, fontSize: 14 }}>{isOpenDay ? "פתוח היום" : "סגור היום"}</span>
+            {isOpenDay && todayRec?.opened && !todayRec?.closed && (
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: 8, background: load.busy ? "#F3D8CE" : "#ffffff26", color: load.busy ? "#5C2A16" : "#fff" }}>
+                <Bath size={12} /> {load.busy ? "עומס גבוה כרגע (הערכה)" : "אין עומס מיוחד (הערכה)"}
+              </span>
+            )}
           </div>
           <h1 className="font-display" style={{ margin: "0 0 6px", fontSize: 26 }}>{mikveh.name}</h1>
           <p style={{ margin: 0, opacity: 0.95, fontSize: 15 }}>שעות פתיחה היום ({WEEKDAYS_HE[weekday]}): <b>{todaysHours}</b>{tonightNames.length > 0 && <> · בלנית הערב: <b>{tonightNames.join(", ")}</b></>}</p>
           <p style={{ marginTop: 4, opacity: 0.9, fontSize: 13 }}>{mikveh.address}{mikveh.phone && <> · {mikveh.phone}</>}</p>
+          {(mikveh.pinnedNote || todayRec?.dailyNote) && (
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+              {mikveh.pinnedNote && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#ffffff22", borderRadius: 10, padding: "8px 12px", fontSize: 13 }}>
+                  <Info size={14} style={{ flexShrink: 0 }} /> {mikveh.pinnedNote}
+                </div>
+              )}
+              {todayRec?.dailyNote && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#ffffff22", borderRadius: 10, padding: "8px 12px", fontSize: 13 }}>
+                  <Bell size={14} style={{ flexShrink: 0 }} /> {todayRec.dailyNote}
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
             <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ ...btnGold, textDecoration: "none" }}><Navigation size={15} /> ניווט למקווה</a>
             <button onClick={() => setExpanded((x) => !x)} style={{ ...btnBase("#ffffff22", "#fff") }}>
