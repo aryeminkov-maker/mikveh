@@ -2088,14 +2088,20 @@ function AdminAttendance({ data, mikvehId }) {
 
   const saveAll = async () => {
     setSaving(true); setError(""); setSaved(false);
+    console.log("[Attendance] saving to key:", storageKey, "draft:", JSON.stringify(draft));
     try {
-      await storage.set(storageKey, draft, true);
-      // Also update the local useShared state so the UI reflects immediately
-      data.setDefaultSchedule(draft);
+      const result = await storage.set(storageKey, draft);
+      console.log("[Attendance] storage.set result:", result);
+      // Update in-memory state so UI and other components reflect saved data immediately
+      data.setDefaultSchedule(() => draft);
+      // Verify round-trip by reading back
+      const verify = await storage.get(storageKey);
+      console.log("[Attendance] verify read-back:", verify);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (e) {
-      setError("שגיאה בשמירה — בדקי חיבור לאינטרנט ונסי שוב");
+      console.error("[Attendance] save error:", e);
+      setError("שגיאה בשמירה: " + (e?.message || String(e)));
     } finally {
       setSaving(false);
     }
