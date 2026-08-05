@@ -1545,13 +1545,12 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
   }, [mikvehs, mikvehId]);
 
   const mikveh = mikvehs.find((m) => m.id === mikvehId);
-  const data = useSystemData(mikvehId);
+  const data = useSystemData(mikvehId); // still needed for AdminStaff guest list
 
   const tabs = [
     { id: "mikvehs", label: "מקוואות", icon: Building2 },
     { id: "dashboard", label: "דשבורד", icon: TrendingUp },
     { id: "staff", label: "ניהול בלניות", icon: Users },
-    { id: "attendance", label: "נוכחות וסידור", icon: CalendarCheck },
     { id: "water", label: "איכות מים", icon: Thermometer },
     { id: "finance", label: "דוחות כספיים", icon: FileSpreadsheet },
     { id: "dippers-report", label: "דוח טובלות", icon: Users },
@@ -1559,7 +1558,7 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
     { id: "tickets", label: "קריאות תפעול", icon: Wrench },
     { id: "permissions", label: "הרשאות", icon: ShieldCheck },
   ];
-  const needsMikveh = !["mikvehs", "permissions"].includes(tab);
+  const needsMikveh = !["mikvehs", "permissions", "staff"].includes(tab);
 
   return (
     <div style={{ paddingTop: 18 }}>
@@ -1590,16 +1589,10 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
       )}
 
       {tab === "mikvehs" && <AdminMikvehs mikvehsCtl={mikvehsCtl} />}
-      {needsMikveh && !mikveh && <Empty text="אין עדיין מקוואות במערכת — יש להוסיף מקווה בלשונית 'מקוואות'." />}
-      {tab === "dashboard" && mikveh && <AdminDashboard key={mikvehId} data={data} />}
-      {tab === "staff" && mikveh && <AdminStaff key={mikvehId} data={data} mikveh={mikveh} />}
-      {tab === "attendance" && mikveh && <AdminAttendance key={mikvehId} data={data} />}
-      {tab === "water" && mikveh && <AdminWater key={mikvehId} data={data} />}
-      {tab === "finance" && mikveh && <AdminFinance key={mikvehId} data={data} />}
-      {tab === "dippers-report" && <AdminDippersReport mikvehsCtl={mikvehsCtl} currentMikveh={mikveh} />}
-      {tab === "audit" && mikveh && <AdminAudit key={mikvehId} data={data} />}
-      {tab === "tickets" && mikveh && <AdminTickets key={mikvehId} data={data} />}
+      {tab === "staff" && <AdminStaff data={data} mikveh={mikveh} />}
       {tab === "permissions" && <AdminPermissions adminEmails={adminEmails} setAdminEmails={setAdminEmails} mikvehs={mikvehs} authUser={authUser} />}
+      {needsMikveh && !mikveh && <Empty text="אין עדיין מקוואות במערכת — יש להוסיף מקווה בלשונית 'מקוואות'." />}
+      {mikveh && <AdminMikvehContent key={mikvehId} mikvehId={mikvehId} mikveh={mikveh} tab={tab} mikvehsCtl={mikvehsCtl} />}
     </div>
   );
 }
@@ -1610,6 +1603,20 @@ function StatMini({ label, value, warn }) {
       <div style={{ fontSize: 17, fontWeight: 800, color: warn ? COLORS.red : COLORS.ink }}>{value}</div>
       <div style={{ fontSize: 10.5, color: "#7a8f8d" }}>{label}</div>
     </div>
+  );
+}
+
+function AdminMikvehContent({ mikvehId, mikveh, tab, mikvehsCtl }) {
+  const data = useSystemData(mikvehId);
+  return (
+    <>
+      {tab === "dashboard" && <AdminDashboard data={data} />}
+      {tab === "water" && <AdminWater data={data} />}
+      {tab === "finance" && <AdminFinance data={data} />}
+      {tab === "dippers-report" && <AdminDippersReport mikvehsCtl={mikvehsCtl} currentMikveh={mikveh} />}
+      {tab === "audit" && <AdminAudit data={data} />}
+      {tab === "tickets" && <AdminTickets data={data} />}
+    </>
   );
 }
 
