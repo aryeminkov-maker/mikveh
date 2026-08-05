@@ -1840,7 +1840,7 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
             </div>
           </div>
 
-          <p style={{ fontSize: 11.5, color: "#7a8f8d", margin: 0 }}>ניהול צוות הבלניות ושיבוץ נוכחות עברו ללשונית "ניהול בלניות".</p>
+
 
           <div style={{ background: COLORS.seafoam, borderRadius: 11, padding: 12 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><Tablet size={13} /> קישור להתקנת טאבלט קבוע במקווה זה</div>
@@ -1852,10 +1852,33 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
             <div style={{ marginTop: 6, fontSize: 11.5, color: "#7a8f8d" }}>לפתוח את הקישור בדפדפן הטאבלט הפיזי שיישאר קבוע במקווה — פעולה חד-פעמית.</div>
           </div>
 
+          <AttendanceInline data={data} mikvehId={mikveh.id} />
+
           <button onClick={() => { if (window.confirm(`למחוק את "${mikveh.name}"? כל הנתונים שלו יישארו מאוחסנים אך לא יוצגו יותר.`)) mikvehsCtl.removeMikveh(mikveh.id); }}
             style={{ ...btnGhost, color: COLORS.red, borderColor: COLORS.red + "55", alignSelf: "flex-start" }}>
             <Trash2 size={14} /> מחיקת המקווה
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AttendanceInline({ data, mikvehId }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ borderTop: `1px solid ${COLORS.aqua}22`, paddingTop: 16 }}>
+      <button onClick={() => setOpen((x) => !x)} style={{
+        display: "flex", alignItems: "center", gap: 8, background: "none", border: "none",
+        cursor: "pointer", fontWeight: 700, fontSize: 14.5, color: COLORS.teal, padding: 0,
+      }}>
+        <CalendarCheck size={16} />
+        ניהול נוכחות בלניות
+        <ChevronRight size={15} style={{ transform: open ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform .15s" }} />
+      </button>
+      {open && (
+        <div style={{ marginTop: 16 }}>
+          <AdminAttendance key={mikvehId} data={data} />
         </div>
       )}
     </div>
