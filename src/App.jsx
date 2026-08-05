@@ -375,7 +375,7 @@ function SetupMessage({ title, text, action, bad }) {
    ============================================================ */
 function useSystemData(mikvehId) {
   const k = (base) => `${base}:${mikvehId || "unassigned"}`;
-  const [staff, setStaff, staffLoaded] = useShared(k("staff"), DEFAULT_STAFF);
+  const [staff, setStaff, staffLoaded] = useShared("staff:global", DEFAULT_STAFF);
   const [checklist, setChecklist] = useShared(k("checklist-by-date"), {});
   const [dippersLog, setDippersLog] = useShared(k("dippers-log"), []);
   const [inventory, setInventory] = useShared(k("inventory"), DEFAULT_INVENTORY);
@@ -2021,7 +2021,7 @@ function AdminStaff({ data, mikveh }) {
     <>
       <Card title="צוות בלניות" icon={Users} right={!editing && <button style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5 }} onClick={startNew}><Plus size={14} /> בלנית חדשה</button>}>
         <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
-          כתובת המייל (אם הוזנה) מאשרת אוטומטית כניסה מהטלפון האישי עם אותו חשבון Google, כבלנית הזו.
+          רשימה כלל-מועצתית — מופיעה בכל המקוואות. שיבוץ הבלניות למקוואות נעשה בנוכחות וסידור (בתוך כל מקווה). כתובת המייל מאפשרת כניסה מהטלפון האישי.
         </p>
         {editing && (
           <div style={{ background: COLORS.seafoam, borderRadius: 12, padding: 14, marginBottom: 14 }}>
