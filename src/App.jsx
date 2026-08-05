@@ -1885,7 +1885,7 @@ function AttendanceInline({ data, mikvehId }) {
       </button>
       {open && (
         <div style={{ marginTop: 16 }}>
-          <AdminAttendance key={mikvehId} data={data} />
+          <AdminAttendance key={mikvehId} data={data} mikvehId={mikvehId} />
         </div>
       )}
     </div>
@@ -2071,28 +2071,70 @@ function AdminStaff({ data, mikveh }) {
   );
 }
 
-function AdminAttendance({ data }) {
+function AdminAttendance({ data, mikvehId }) {
+  const storageKey = `default-schedule:${mikvehId || "unassigned"}`;
   const recent = data.loginLog.slice(0, 15);
 
-  const defaultStaff = data.staff.find((s) => s.id === data.defaultSchedule.__default);
-  const setDefaultStaff = (id) => data.setDefaultSchedule((prev) => ({ ...prev, __default: id || null }));
+  // ─── Local draft state — user edits here, saves all at once ───────────────
+  const [draft, setDraft] = useState(() => JSON.parse(JSON.stringify(data.defaultSchedule)));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
 
+  const patchDraft = (updater) => setDraft((prev) => {
+    const next = typeof updater === "function" ? updater(prev) : updater;
+    return { ...next };
+  });
+
+  const saveAll = async () => {
+    setSaving(true); setError(""); setSaved(false);
+    try {
+      await storage.set(storageKey, draft, true);
+      // Also update the local useShared state so the UI reflects immediately
+      data.setDefaultSchedule(draft);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      setError("שגיאה בשמירה — בדקי חיבור לאינטרנט ונסי שוב");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ─── Default shifts ────────────────────────────────────────────────────────
+  const defaultShifts = draft.__defaultShifts || (
+    draft.__default ? [{ staffId: draft.__default, start: "", end: "" }] : []
+  );
+  const [defStaffId, setDefStaffId] = useState("");
+  const [defStart, setDefStart] = useState("20:00");
+  const [defEnd, setDefEnd] = useState("23:30");
+  const addDefaultShift = () => {
+    if (!defStaffId) return;
+    const next = [...defaultShifts, { staffId: defStaffId, start: defStart, end: defEnd }];
+    patchDraft((prev) => ({ ...prev, __defaultShifts: next, __default: next[0]?.staffId || null }));
+    setDefStaffId(""); setDefStart("20:00"); setDefEnd("23:30");
+  };
+  const removeDefaultShift = (idx) => {
+    const next = defaultShifts.filter((_, i) => i !== idx);
+    patchDraft((prev) => ({ ...prev, __defaultShifts: next, __default: next[0]?.staffId || null }));
+  };
+
+  // ─── Bulk shift add ────────────────────────────────────────────────────────
   const [selectedDays, setSelectedDays] = useState([]);
   const [bulkStaffId, setBulkStaffId] = useState("");
   const [bulkStart, setBulkStart] = useState("20:00");
   const [bulkEnd, setBulkEnd] = useState("23:30");
   const [bulkType, setBulkType] = useState("weekly");
   const [bulkDate, setBulkDate] = useState(todayStr());
-
   const toggleDay = (i) => setSelectedDays((prev) => prev.includes(i) ? prev.filter((d) => d !== i) : [...prev, i]);
   const selectAll = () => setSelectedDays(selectedDays.length === 7 ? [] : [0,1,2,3,4,5,6]);
   const selectWeekdays = () => setSelectedDays([0,1,2,3,4]);
 
-  const applyBulk = () => {
-    if (!bulkStaffId || selectedDays.length === 0) return;
+  const addBulkShift = () => {
+    if (!bulkStaffId || !selectedDays.length) return;
     const shift = { staffId: bulkStaffId, start: bulkStart, end: bulkEnd };
     if (bulkType === "once") {
-      data.setDefaultSchedule((prev) => {
+      patchDraft((prev) => {
         const ovr = { ...(prev.__overrides || {}) };
         selectedDays.forEach((d) => {
           const date = nthWeekdayDate(d, bulkDate);
@@ -2101,30 +2143,23 @@ function AdminAttendance({ data }) {
         return { ...prev, __overrides: ovr };
       });
     } else {
-      data.setDefaultSchedule((prev) => {
+      patchDraft((prev) => {
         const next = { ...prev };
         selectedDays.forEach((d) => {
-          const cur = Array.isArray(prev[d]) ? prev[d] : [];
-          next[d] = [...cur, shift];
+          next[d] = [...(Array.isArray(prev[d]) ? prev[d] : []), shift];
         });
         return next;
       });
     }
-    setSelectedDays([]); setBulkStaffId(""); setBulkStart("20:00"); setBulkEnd("23:30");
-    data.addAudit("ניהול", bulkType === "once" ? "שיבוץ חד-פעמי" : "שיבוץ קבוע",
-      `${data.staff.find((s) => s.id === bulkStaffId)?.name} — ${selectedDays.map((d) => WEEKDAYS_HE[d]).join(", ")}`);
+    setSelectedDays([]); setBulkStaffId("");
   };
 
   const removeWeeklyShift = (day, idx) => {
-    data.setDefaultSchedule((prev) => {
-      const cur = Array.isArray(prev[day]) ? prev[day] : [];
-      return { ...prev, [day]: cur.filter((_, i) => i !== idx) };
-    });
+    patchDraft((prev) => ({ ...prev, [day]: (Array.isArray(prev[day]) ? prev[day] : []).filter((_, i) => i !== idx) }));
   };
-
-  const overrides = data.defaultSchedule.__overrides || {};
+  const overrides = draft.__overrides || {};
   const removeOverride = (date, idx) => {
-    data.setDefaultSchedule((prev) => {
+    patchDraft((prev) => {
       const ovr = { ...(prev.__overrides || {}) };
       const arr = (ovr[date] || []).filter((_, i) => i !== idx);
       if (arr.length === 0) delete ovr[date]; else ovr[date] = arr;
@@ -2132,34 +2167,13 @@ function AdminAttendance({ data }) {
     });
   };
 
-  const defaultShifts = (data.defaultSchedule.__defaultShifts) || (
-    // backward compat: old single-staff __default
-    data.defaultSchedule.__default
-      ? [{ staffId: data.defaultSchedule.__default, start: "", end: "" }]
-      : []
-  );
-  const setDefaultShifts = (shifts) => data.setDefaultSchedule((prev) => ({
-    ...prev,
-    __defaultShifts: shifts,
-    __default: shifts.length === 1 ? shifts[0].staffId : (prev.__default || null),
-  }));
-  const [defStaffId, setDefStaffId] = useState("");
-  const [defStart, setDefStart] = useState("20:00");
-  const [defEnd, setDefEnd] = useState("23:30");
-  const addDefaultShift = () => {
-    if (!defStaffId) return;
-    setDefaultShifts([...defaultShifts, { staffId: defStaffId, start: defStart, end: defEnd }]);
-    setDefStaffId(""); setDefStart("20:00"); setDefEnd("23:30");
-  };
-  const removeDefaultShift = (idx) => setDefaultShifts(defaultShifts.filter((_, i) => i !== idx));
-
   return (
     <>
+      {/* ── Default staff ── */}
       <Card title="בלנית/ות ברירת מחדל למקווה זה" icon={Users}>
         <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
-          מוצגות בכל יום שאין בו שיבוץ ספציפי. אפשר להגדיר כמה בלניות עם חלוקת שעות ביניהן. כל מקווה מנהל ברירת מחדל משלו.
+          מוצגות בכל יום שאין בו שיבוץ ספציפי. כל מקווה מנהל ברירת מחדל משלו.
         </p>
-
         {defaultShifts.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
             {defaultShifts.map((s, idx) => {
@@ -2167,8 +2181,7 @@ function AdminAttendance({ data }) {
               return (
                 <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.aquaLight, borderRadius: 9, padding: "8px 12px" }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600 }}>
-                    {st?.name || "?"}
-                    {s.start && <span style={{ fontWeight: 400, color: "#7a8f8d" }}> · {s.start}–{s.end || "?"}</span>}
+                    {st?.name || "?"}{s.start && <span style={{ fontWeight: 400, color: "#7a8f8d" }}> · {s.start}–{s.end || "?"}</span>}
                   </span>
                   <button onClick={() => removeDefaultShift(idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={14} /></button>
                 </div>
@@ -2176,7 +2189,6 @@ function AdminAttendance({ data }) {
             })}
           </div>
         )}
-
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <select style={{ ...inputStyle, width: "auto", minWidth: 140 }} value={defStaffId} onChange={(e) => setDefStaffId(e.target.value)}>
             <option value="">בחרי בלנית…</option>
@@ -2185,19 +2197,12 @@ function AdminAttendance({ data }) {
           <input type="time" style={{ ...inputStyle, width: "auto" }} value={defStart} onChange={(e) => setDefStart(e.target.value)} />
           <span>–</span>
           <input type="time" style={{ ...inputStyle, width: "auto" }} value={defEnd} onChange={(e) => setDefEnd(e.target.value)} />
-          <button style={{ ...btnPrimary, opacity: defStaffId ? 1 : 0.4 }} onClick={addDefaultShift} disabled={!defStaffId}>
-            <Plus size={14} /> הוספה
-          </button>
+          <button style={{ ...btnGhost, opacity: defStaffId ? 1 : 0.4 }} onClick={addDefaultShift} disabled={!defStaffId}><Plus size={14} /> הוספה</button>
         </div>
-        {defaultShifts.length === 0 && (
-          <div style={{ fontSize: 11.5, color: "#b0c4c2", marginTop: 8 }}>לא הוגדרה ברירת מחדל — ימים ללא שיבוץ יוצגו כ"לא שובצה".</div>
-        )}
       </Card>
 
+      {/* ── Bulk add ── */}
       <Card title="הוספת שיבוץ — קבוע או חד-פעמי" icon={CalendarCheck}>
-        <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
-          אפשר לבחור כמה ימים בבת-אחת. שיבוץ קבוע חוזר כל שבוע; חד-פעמי גובר על הקבוע לאותו תאריך בלבד.
-        </p>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
           {[["כולם", selectAll], ["א'–ה'", selectWeekdays]].map(([label, fn]) => (
             <button key={label} onClick={fn} style={{ ...btnGhost, padding: "5px 10px", fontSize: 12 }}>{label}</button>
@@ -2219,41 +2224,35 @@ function AdminAttendance({ data }) {
           <input type="time" style={{ ...inputStyle, width: "auto" }} value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} />
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-          {[["weekly", "קבוע (כל שבוע)"], ["once", "חד-פעמי (תאריך ספציפי)"]].map(([id, label]) => (
+          {[["weekly", "קבוע (כל שבוע)"], ["once", "חד-פעמי (תאריך)"]].map(([id, label]) => (
             <button key={id} onClick={() => setBulkType(id)} style={{
               ...btnBase(bulkType === id ? COLORS.teal : "#fff", bulkType === id ? "#fff" : COLORS.ink),
               fontSize: 13, padding: "8px 13px", border: `1px solid ${bulkType === id ? COLORS.teal : "#00000018"}`,
             }}>{label}</button>
           ))}
-          {bulkType === "once" && (
-            <input type="date" style={{ ...inputStyle, width: "auto" }} value={bulkDate} onChange={(e) => setBulkDate(e.target.value)} />
-          )}
+          {bulkType === "once" && <input type="date" style={{ ...inputStyle, width: "auto" }} value={bulkDate} onChange={(e) => setBulkDate(e.target.value)} />}
         </div>
-        <button style={{ ...btnPrimary, opacity: (bulkStaffId && selectedDays.length) ? 1 : 0.4 }}
-          onClick={applyBulk} disabled={!bulkStaffId || !selectedDays.length}>
+        <button style={{ ...btnGhost, opacity: (bulkStaffId && selectedDays.length) ? 1 : 0.4 }}
+          onClick={addBulkShift} disabled={!bulkStaffId || !selectedDays.length}>
           <Plus size={14} /> {bulkType === "once" ? "הוספת שיבוץ חד-פעמי" : "הוספת שיבוץ קבוע"}
         </button>
       </Card>
 
+      {/* ── Weekly schedule ── */}
       <Card title="שיבוץ שבועי קבוע" icon={CalendarCheck}>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {WEEKDAYS_HE.map((day, i) => {
-            const shifts = Array.isArray(data.defaultSchedule[i]) ? data.defaultSchedule[i] : [];
+            const shifts = Array.isArray(draft[i]) ? draft[i] : [];
+            const defNames = defaultShifts.map((s) => { const st = data.staff.find((x) => x.id === s.staffId); return (st?.name || "?") + (s.start ? ` ${s.start}–${s.end}` : ""); }).join(", ");
             return (
               <div key={i} style={{ borderTop: i > 0 ? "1px solid #00000010" : "none", paddingTop: i > 0 ? 10 : 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 5, color: COLORS.teal }}>{day}</div>
-                {shifts.length === 0 && (
-                  <div style={{ fontSize: 12, color: "#b0c4c2" }}>
-                    {defaultShifts.length
-                      ? `ברירת מחדל: ${defaultShifts.map((s) => { const st = data.staff.find((x) => x.id === s.staffId); return (st?.name || "?") + (s.start ? ` ${s.start}–${s.end}` : ""); }).join(", ")}`
-                      : "ללא שיבוץ"}
-                  </div>
-                )}
+                {shifts.length === 0 && <div style={{ fontSize: 12, color: "#b0c4c2" }}>{defNames ? `ברירת מחדל: ${defNames}` : "ללא שיבוץ"}</div>}
                 {shifts.map((s, idx) => {
                   const st = data.staff.find((x) => x.id === s.staffId);
                   return (
                     <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.aquaLight, borderRadius: 9, padding: "7px 11px", marginBottom: 4 }}>
-                      <span style={{ fontSize: 13 }}><b>{st?.name || "?"}</b>{s.start ? <span style={{ color: "#7a8f8d" }}> · {s.start}–{s.end || "?"}</span> : ""}</span>
+                      <span style={{ fontSize: 13 }}><b>{st?.name || "?"}</b>{s.start && <span style={{ color: "#7a8f8d" }}> · {s.start}–{s.end || "?"}</span>}</span>
                       <button onClick={() => removeWeeklyShift(i, idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={14} /></button>
                     </div>
                   );
@@ -2264,6 +2263,7 @@ function AdminAttendance({ data }) {
         </div>
       </Card>
 
+      {/* ── One-time overrides ── */}
       {Object.keys(overrides).length > 0 && (
         <Card title="שיבוצים חד-פעמיים" icon={CalendarCheck}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -2285,6 +2285,18 @@ function AdminAttendance({ data }) {
         </Card>
       )}
 
+      {/* ── Save button ── */}
+      <div style={{ background: COLORS.paper, borderRadius: 14, padding: 16, border: `1px solid ${COLORS.aqua}22`, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <button style={{ ...btnPrimary, fontSize: 15, padding: "12px 24px", opacity: saving ? 0.6 : 1 }} onClick={saveAll} disabled={saving}>
+          {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Check size={16} />}
+          {saving ? "שומר…" : "שמירת כל השיבוצים"}
+        </button>
+        {saved && <span style={{ fontSize: 13.5, color: COLORS.teal, fontWeight: 700 }}>✓ נשמר בהצלחה ב-Firestore</span>}
+        {error && <span style={{ fontSize: 13, color: COLORS.red, fontWeight: 600 }}>{error}</span>}
+        <span style={{ fontSize: 12, color: "#7a8f8d" }}>שינויים שלא נשמרו לא יישמרו אחרי רענון</span>
+      </div>
+
+      {/* ── Actual login log ── */}
       <Card title="כניסות בפועל" icon={CalendarCheck}>
         <Table headers={["בלנית", "תאריך", "שעה"]}
           rows={recent.map((l) => [l.staffName, fmtDate(l.ts), fmtDateTime(l.ts).split(" ")[1]])}
@@ -2294,7 +2306,6 @@ function AdminAttendance({ data }) {
   );
 }
 
-// helper: get the date string for a given weekday index within the week containing baseDate
 function nthWeekdayDate(dayIdx, baseDate) {
   const base = new Date(baseDate);
   const diff = dayIdx - base.getDay();
