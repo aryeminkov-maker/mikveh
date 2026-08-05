@@ -131,7 +131,7 @@ const OPENING_HOURS = [
 ];
 
 const DEFAULT_MIKVEHS = [
-  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
+  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, price: "25", paymentUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
 ];
 
 /* ============================================================
@@ -172,7 +172,7 @@ function useMikvehs() {
   const [list, setList] = useShared("mikvehs", DEFAULT_MIKVEHS);
 
   const addMikveh = useCallback((name, address) => {
-    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
+    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, price: "25", paymentUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
   }, [setList]);
 
   const updateMikveh = useCallback((id, patch) => {
@@ -1381,8 +1381,8 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
 
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
 
-  const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3 });
-  useEffect(() => { setForm({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3 }); }, [mikveh.id]);
+  const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "" });
+  useEffect(() => { setForm({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "" }); }, [mikveh.id]);
   const saveForm = () => mikvehsCtl.updateMikveh(mikveh.id, { ...form, photoUrl: toDirectImageUrl(form.photoUrl) });
 
   const [newPhotoUrl, setNewPhotoUrl] = useState("");
@@ -1470,7 +1470,11 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
               <Field label="שם"><input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
               <Field label="כתובת"><input style={inputStyle} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
               <Field label="טלפון"><input style={inputStyle} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
+              <Field label="עלות טבילה (₪)"><input style={inputStyle} value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="25" inputMode="decimal" /></Field>
             </div>
+            <Field label="קישור לתשלום מקוון (ייפתח כשהתושבת תלחץ 'לתשלום')">
+              <input style={inputStyle} value={form.paymentUrl} onChange={(e) => setForm({ ...form, paymentUrl: e.target.value })} placeholder="https://..." />
+            </Field>
             <Field label="הערות נוספות (יוצגו לתושבות בממשק הציבורי, בתוך 'עוד פרטים')">
               <textarea style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </Field>
@@ -1991,15 +1995,29 @@ function estimateLoad(dippersLog, roomsCount, today) {
 }
 
 function tonightStaff(data, weekday, today) {
+  // Actual logins take priority — merge with scheduled shifts to show hours
   const actual = data.loginLog.filter((l) => l.ts.slice(0, 10) === today);
-  if (actual.length) return { names: actual.map((l) => l.staffName), isActual: true };
-  const shifts = scheduleShifts(data.defaultSchedule, weekday);
-  const names = shifts.map((s) => {
+  const scheduled = scheduleShifts(data.defaultSchedule, weekday);
+
+  if (actual.length) {
+    // For each actual login, find the matching scheduled shift (if any) to show hours
+    const shifts = actual.map((l) => {
+      const match = scheduled.find((s) => {
+        const st = data.staff.find((x) => x.id === s.staffId);
+        return st && st.name === l.staffName;
+      });
+      return { name: l.staffName, start: match?.start || "", end: match?.end || "", isActual: true };
+    });
+    return { shifts, names: shifts.map((s) => s.name), isActual: true };
+  }
+
+  // No actual logins — use scheduled shifts
+  const shifts = scheduled.map((s) => {
     const st = data.staff.find((x) => x.id === s.staffId);
     if (!st) return null;
-    return s.start ? `${st.name} (${s.start}–${s.end || "?"})` : st.name;
+    return { name: st.name, start: s.start || "", end: s.end || "", isActual: false };
   }).filter(Boolean);
-  return { names, isActual: false };
+  return { shifts, names: shifts.map((s) => s.name), isActual: false };
 }
 
 function PublicMikvehDetail({ mikveh }) {
@@ -2011,7 +2029,7 @@ function PublicMikvehDetail({ mikveh }) {
   const isOpenDay = todaysHours !== "סגור";
   const [expanded, setExpanded] = useState(false);
 
-  const { names: tonightNames } = tonightStaff(data, weekday, today);
+  const { shifts: tonightShifts, names: tonightNames, isActual: tonightIsActual } = tonightStaff(data, weekday, today);
   const load = estimateLoad(data.dippersLog, mikveh.roomsCount, today);
   const todayRec = data.checklist[today];
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
@@ -2037,7 +2055,19 @@ function PublicMikvehDetail({ mikveh }) {
             )}
           </div>
           <h1 className="font-display" style={{ margin: "0 0 6px", fontSize: 26 }}>{mikveh.name}</h1>
-          <p style={{ margin: 0, opacity: 0.95, fontSize: 15 }}>שעות פתיחה היום ({WEEKDAYS_HE[weekday]}): <b>{todaysHours}</b>{tonightNames.length > 0 && <> · בלנית הערב: <b>{tonightNames.join(", ")}</b></>}</p>
+          <p style={{ margin: "0 0 6px", opacity: 0.95, fontSize: 15 }}>שעות פתיחה היום ({WEEKDAYS_HE[weekday]}): <b>{todaysHours}</b></p>
+          {tonightShifts.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {tonightShifts.map((s, i) => (
+                <p key={i} style={{ margin: 0, opacity: 0.9, fontSize: 14 }}>
+                  {i === 0 ? "בלנית הערב: " : <span style={{ opacity: 0 }}>בלנית הערב: </span>}
+                  <b>{s.name}</b>
+                  {s.start ? <> · {s.start}–{s.end || "?"}</> : ""}
+                  {!tonightIsActual && <span style={{ opacity: 0.7, fontSize: 12 }}> (משובצת)</span>}
+                </p>
+              ))}
+            </div>
+          )}
           <p style={{ marginTop: 4, opacity: 0.9, fontSize: 13 }}>{mikveh.address}{mikveh.phone && <> · {mikveh.phone}</>}</p>
           {(mikveh.pinnedNote || todayRec?.dailyNote) && (
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
@@ -2055,6 +2085,11 @@ function PublicMikvehDetail({ mikveh }) {
           )}
           <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
             <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ ...btnGold, textDecoration: "none" }}><Navigation size={15} /> ניווט למקווה</a>
+            {mikveh.paymentUrl && (
+              <a href={mikveh.paymentUrl} target="_blank" rel="noreferrer" style={{ ...btnBase("#ffffff22", "#fff"), textDecoration: "none" }}>
+                <Wallet size={15} /> לתשלום מקוון
+              </a>
+            )}
             <button onClick={() => setExpanded((x) => !x)} style={{ ...btnBase("#ffffff22", "#fff") }}>
               {expanded ? "הסתרת פרטים" : "עוד פרטים"} <ChevronRight size={14} style={{ transform: expanded ? "rotate(90deg)" : "rotate(-90deg)", transition: "transform .15s" }} />
             </button>
@@ -2064,9 +2099,19 @@ function PublicMikvehDetail({ mikveh }) {
 
       {expanded && (
         <div>
+          {mikveh.price && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, background: COLORS.aquaLight, borderRadius: 12, padding: "12px 16px", marginBottom: 4 }}>
+              <Wallet size={16} color={COLORS.teal} />
+              <span style={{ fontWeight: 700, fontSize: 15, color: COLORS.teal }}>עלות טבילה: ₪{mikveh.price}</span>
+              {mikveh.paymentUrl && (
+                <a href={mikveh.paymentUrl} target="_blank" rel="noreferrer" style={{ ...btnPrimary, fontSize: 12.5, padding: "6px 12px", textDecoration: "none", marginRight: "auto" }}>
+                  לתשלום מקוון
+                </a>
+              )}
+            </div>
+          )}
           <Card title="שעות פתיחה שבועיות" icon={Clock}>
             <Table headers={["יום", "שעות"]} rows={hours.map((d) => [d.day, d.hours])} empty="" />
-            <p style={{ fontSize: 12, color: "#7a8f8d", marginTop: 10, marginBottom: 0 }}>שעות השבוע הצמודות לשקיעה/צאת הכוכבים מחושבות אוטומטית באתר הסופי; כאן מוצגות שעות לדוגמה.</p>
           </Card>
           {(mikveh.photos || []).length > 0 && (
             <Card title="תמונות מהמקווה" icon={Image}>
