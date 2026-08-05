@@ -973,7 +973,7 @@ function KioskDippers({ data, staffName, flash }) {
   const [dur, setDur] = useState("");
   const [customMin, setCustomMin] = useState("");
   const [pay, setPay] = useState("");
-  const [payAmount, setPayAmount] = useState("");
+  const [payAmount, setPayAmount] = useState("25");
   const [label, setLabel] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [localLabels, setLocalLabels] = useState({});
@@ -982,7 +982,7 @@ function KioskDippers({ data, staffName, flash }) {
   const durObj = DURATION_OPTIONS.find((d) => d.id === dur);
   const canSubmit = dur && pay;
 
-  const resetForm = () => { setDur(""); setCustomMin(""); setPay(""); setPayAmount(""); setLabel(""); setShowForm(false); };
+  const resetForm = () => { setDur(""); setCustomMin(""); setPay(""); setPayAmount("25"); setLabel(""); setShowForm(false); };
 
   const submitVisit = () => {
     if (!canSubmit) { flash("נא לבחור סוג טבילה ואופן תשלום"); return; }
@@ -1080,20 +1080,32 @@ function KioskDippers({ data, staffName, flash }) {
       {todayEntries.length > 0 && (
         <Card title={`טובלות במשמרת (${todayCount})`} icon={Users}>
           {/* Summary bar */}
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14, paddingBottom: 14, borderBottom: `1px solid ${COLORS.aqua}22` }}>
-            {[
-              { label: "שולם", value: fmtILS(todayCash + todayCredit + todayPrepaid), color: COLORS.teal, show: (todayCash + todayCredit + todayPrepaid) > 0 },
-              { label: "מזומן", value: fmtILS(todayCash), color: COLORS.teal, sub: true, show: todayCash > 0 },
-              { label: "אשראי", value: fmtILS(todayCredit), color: COLORS.teal, sub: true, show: todayCredit > 0 },
-              { label: "מראש", value: fmtILS(todayPrepaid), color: COLORS.teal, sub: true, show: todayPrepaid > 0 },
-              { label: "חוב", value: fmtILS(todayEntries.filter((e) => e.status === "pending").reduce((s) => s + 25, 0)), color: COLORS.red, show: todayEntries.some((e) => e.status === "pending") },
-              { label: "פטורות", value: todayEntries.filter((e) => e.status === "exempt").length, color: COLORS.aqua, show: todayEntries.some((e) => e.status === "exempt") },
-            ].filter((s) => s.show).map((s) => (
-              <div key={s.label} style={{ textAlign: "center", opacity: s.sub ? 0.75 : 1 }}>
-                <div style={{ fontSize: s.sub ? 14 : 16, fontWeight: 800, color: s.color }}>{s.value}</div>
-                <div style={{ fontSize: 10.5, color: "#7a8f8d" }}>{s.label}</div>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 14, paddingBottom: 14, borderBottom: `1px solid ${COLORS.aqua}22` }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: COLORS.teal }}>{todayCount}</div>
+              <div style={{ fontSize: 10.5, color: "#7a8f8d" }}>טובלות</div>
+            </div>
+            {(todayCash + todayCredit + todayPrepaid) > 0 && (
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: COLORS.teal }}>{fmtILS(todayCash + todayCredit + todayPrepaid)}</div>
+                <div style={{ fontSize: 10.5, color: "#7a8f8d" }}>שולם</div>
               </div>
-            ))}
+            )}
+            {todayCash > 0 && <div style={{ textAlign: "center", opacity: 0.8 }}><div style={{ fontSize: 15, fontWeight: 700, color: COLORS.teal }}>{fmtILS(todayCash)}</div><div style={{ fontSize: 10, color: "#7a8f8d" }}>מזומן</div></div>}
+            {todayCredit > 0 && <div style={{ textAlign: "center", opacity: 0.8 }}><div style={{ fontSize: 15, fontWeight: 700, color: COLORS.teal }}>{fmtILS(todayCredit)}</div><div style={{ fontSize: 10, color: "#7a8f8d" }}>אשראי</div></div>}
+            {todayPrepaid > 0 && <div style={{ textAlign: "center", opacity: 0.8 }}><div style={{ fontSize: 15, fontWeight: 700, color: COLORS.teal }}>{fmtILS(todayPrepaid)}</div><div style={{ fontSize: 10, color: "#7a8f8d" }}>מראש</div></div>}
+            {todayEntries.filter((e) => e.status === "pending").length > 0 && (
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: COLORS.red }}>{todayEntries.filter((e) => e.status === "pending").length}</div>
+                <div style={{ fontSize: 10.5, color: "#7a8f8d" }}>ממתינות לתשלום</div>
+              </div>
+            )}
+            {todayEntries.filter((e) => e.status === "exempt").length > 0 && (
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: COLORS.aqua }}>{todayEntries.filter((e) => e.status === "exempt").length}</div>
+                <div style={{ fontSize: 10.5, color: "#7a8f8d" }}>פטורות</div>
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {todayEntries.map((e) => (
@@ -1186,7 +1198,13 @@ function DipperRow({ entry, data, staffName, flash, localLabel, onSetLabel }) {
           <Field label="שם / כינוי זמני (לא נשמר — רק לנוחיות שלך במשמרת הזו)">
             <input style={inputStyle} value={labelInput} onChange={(e) => setLabelInput(e.target.value)} placeholder='לדוגמה: "שרה מצדדית"' />
           </Field>
-          <button style={btnPrimary} onClick={save}><Check size={14} /> שמירה</button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button style={btnPrimary} onClick={save}><Check size={14} /> שמירה</button>
+            <button style={{ ...btnGhost, color: COLORS.red, borderColor: COLORS.red + "55" }}
+              onClick={() => { if (window.confirm("למחוק רשומה זו?")) { data.setDippersLog((prev) => prev.filter((e) => e.id !== entry.id)); data.addAudit(staffName, "מחיקת רשומת טובלת", `שעה ${entry.time}`); flash("נמחק ✓"); } }}>
+              <Trash2 size={14} /> מחיקה
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -1550,7 +1568,7 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
       {tab === "attendance" && mikveh && <AdminAttendance data={data} />}
       {tab === "water" && mikveh && <AdminWater data={data} />}
       {tab === "finance" && mikveh && <AdminFinance data={data} />}
-      {tab === "dippers-report" && mikveh && <AdminDippersReport data={data} mikveh={mikveh} />}
+      {tab === "dippers-report" && <AdminDippersReport mikvehsCtl={mikvehsCtl} currentMikveh={mikveh} />}
       {tab === "audit" && mikveh && <AdminAudit data={data} />}
       {tab === "tickets" && mikveh && <AdminTickets data={data} />}
       {tab === "permissions" && <AdminPermissions adminEmails={adminEmails} setAdminEmails={setAdminEmails} mikvehs={mikvehs} authUser={authUser} />}
@@ -2091,32 +2109,47 @@ function AdminWater({ data }) {
   );
 }
 
-function AdminDippersReport({ data, mikveh }) {
+function AdminDippersReport({ mikvehsCtl, currentMikveh }) {
+  const mikvehs = mikvehsCtl.list;
+  const [selectedMikvehId, setSelectedMikvehId] = useState("all");
   const [period, setPeriod] = useState("month");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState(todayStr());
+  const [allLogs, setAllLogs] = useState(null);
+
+  // Load dippers logs for all mikvehs
+  useEffect(() => {
+    let active = true;
+    setAllLogs(null);
+    (async () => {
+      const results = await Promise.all(mikvehs.map(async (m) => {
+        const raw = await storage.get(`dippers-log:${m.id}`).catch(() => null);
+        return { mikvehId: m.id, mikvehName: m.name, entries: Array.isArray(raw) ? raw : [] };
+      }));
+      if (active) setAllLogs(results);
+    })();
+    return () => { active = false; };
+  }, [mikvehs]);
 
   const now = new Date();
   const filtered = useMemo(() => {
+    if (!allLogs) return [];
     let from, to;
-    if (period === "24h") {
-      from = new Date(now.getTime() - 24 * 3600000);
-      to = now;
-    } else if (period === "month") {
-      from = new Date(now.getFullYear(), now.getMonth(), 1);
-      to = now;
-    } else if (period === "year") {
-      from = new Date(now.getFullYear(), 0, 1);
-      to = now;
-    } else {
-      from = customFrom ? new Date(customFrom) : new Date(0);
-      to = customTo ? new Date(customTo + "T23:59:59") : now;
-    }
-    return data.dippersLog.filter((e) => {
-      const d = new Date(e.date + (e.time ? "T" + e.time : ""));
-      return d >= from && d <= to;
-    }).slice().reverse();
-  }, [data.dippersLog, period, customFrom, customTo, now]);
+    if (period === "24h") { from = new Date(now.getTime() - 24 * 3600000); to = now; }
+    else if (period === "month") { from = new Date(now.getFullYear(), now.getMonth(), 1); to = now; }
+    else if (period === "year") { from = new Date(now.getFullYear(), 0, 1); to = now; }
+    else { from = customFrom ? new Date(customFrom) : new Date(0); to = customTo ? new Date(customTo + "T23:59:59") : now; }
+
+    const sources = selectedMikvehId === "all" ? allLogs : allLogs.filter((s) => s.mikvehId === selectedMikvehId);
+    const rows = [];
+    sources.forEach(({ mikvehId, mikvehName, entries }) => {
+      entries.forEach((e) => {
+        const d = new Date(e.date + (e.time ? "T" + e.time : ""));
+        if (d >= from && d <= to) rows.push({ ...e, mikvehId, mikvehName });
+      });
+    });
+    return rows.sort((a, b) => (b.date + (b.time || "")) < (a.date + (a.time || "")) ? -1 : 1);
+  }, [allLogs, selectedMikvehId, period, customFrom, customTo]);
 
   const totals = filtered.reduce((acc, e) => ({
     count: acc.count + 1,
@@ -2130,9 +2163,9 @@ function AdminDippersReport({ data, mikveh }) {
   const durLabel = (e) => DURATION_OPTIONS.find((d) => d.id === e.duration)?.label || e.duration || "—";
 
   const exportCsv = () => {
-    const header = "תאריך,שעה,בלנית,כולל התארגנות,סטטוס תשלום,מזומן,אשראי,מראש\n";
+    const header = `תאריך,שעה,מקווה,בלנית,כולל התארגנות,סטטוס תשלום,מזומן,אשראי,מראש\n`;
     const body = filtered.map((e) => [
-      e.date, e.time || "", e.staffName,
+      e.date, e.time || "", e.mikvehName, e.staffName,
       durLabel(e),
       e.status === "exempt" ? "פטורה" : e.status === "pending" ? "ממתינה" : "שולם",
       e.cash || 0, e.credit || 0, e.prepaid || 0,
@@ -2140,7 +2173,7 @@ function AdminDippersReport({ data, mikveh }) {
     const blob = new Blob(["\uFEFF" + header + body], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url;
-    a.download = `דוח-טובלות-${mikveh.name}-${todayStr()}.csv`;
+    a.download = `דוח-טובלות-${todayStr()}.csv`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
@@ -2152,49 +2185,67 @@ function AdminDippersReport({ data, mikveh }) {
     { id: "custom", label: "תקופה בחירה" },
   ];
 
+  const showMikveh = selectedMikvehId === "all" && mikvehs.length > 1;
+
   return (
-    <Card title={`דוח טובלות — ${mikveh.name}`} icon={Users}
+    <Card title="דוח טובלות" icon={Users}
       right={<button style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5 }} onClick={exportCsv}><Download size={14} /> ייצוא CSV</button>}>
 
+      {/* Mikveh selector */}
+      {mikvehs.length > 1 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <button onClick={() => setSelectedMikvehId("all")} style={{ ...btnBase(selectedMikvehId === "all" ? COLORS.teal : "#fff", selectedMikvehId === "all" ? "#fff" : COLORS.ink), fontSize: 13, padding: "8px 13px", border: `1px solid ${selectedMikvehId === "all" ? COLORS.teal : "#00000018"}` }}>
+            כל המקוואות
+          </button>
+          {mikvehs.map((m) => (
+            <button key={m.id} onClick={() => setSelectedMikvehId(m.id)} style={{ ...btnBase(selectedMikvehId === m.id ? COLORS.teal : "#fff", selectedMikvehId === m.id ? "#fff" : COLORS.ink), fontSize: 13, padding: "8px 13px", border: `1px solid ${selectedMikvehId === m.id ? COLORS.teal : "#00000018"}` }}>
+              {m.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Period selector */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         {PERIODS.map((p) => (
-          <button key={p.id} onClick={() => setPeriod(p.id)} style={{
-            ...btnBase(period === p.id ? COLORS.teal : "#fff", period === p.id ? "#fff" : COLORS.ink),
-            fontSize: 13, padding: "8px 13px", border: `1px solid ${period === p.id ? COLORS.teal : "#00000018"}`,
-          }}>{p.label}</button>
+          <button key={p.id} onClick={() => setPeriod(p.id)} style={{ ...btnBase(period === p.id ? COLORS.teal : "#fff", period === p.id ? "#fff" : COLORS.ink), fontSize: 13, padding: "8px 13px", border: `1px solid ${period === p.id ? COLORS.teal : "#00000018"}` }}>{p.label}</button>
         ))}
       </div>
       {period === "custom" && (
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <Field label="מ-"><input type="date" style={{ ...inputStyle, width: "auto" }} value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} /></Field>
           <Field label="עד"><input type="date" style={{ ...inputStyle, width: "auto" }} value={customTo} onChange={(e) => setCustomTo(e.target.value)} /></Field>
         </div>
       )}
 
-      {/* Summary tiles */}
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-        <StatCard label="טובלות" value={totals.count} icon={Users} />
-        <StatCard label="שולם (מזומן)" value={fmtILS(totals.cash)} icon={Wallet} color={COLORS.gold} />
-        <StatCard label="שולם (אשראי)" value={fmtILS(totals.credit)} icon={Wallet} color={COLORS.aqua} />
-        <StatCard label="שולם מראש" value={fmtILS(totals.prepaid)} icon={Wallet} />
-        {totals.pending > 0 && <StatCard label="ממתינות לתשלום" value={totals.pending} icon={Clock3} color={COLORS.red} />}
-        {totals.exempt > 0 && <StatCard label="פטורות (כלה)" value={totals.exempt} icon={Gift} color={COLORS.aqua} />}
-      </div>
+      {allLogs === null ? <CenteredLoading text="טוענת נתונים…" /> : (
+        <>
+          {/* Summary */}
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+            <StatCard label="טובלות" value={totals.count} icon={Users} />
+            <StatCard label="מזומן" value={fmtILS(totals.cash)} icon={Wallet} color={COLORS.gold} />
+            <StatCard label="אשראי" value={fmtILS(totals.credit)} icon={Wallet} color={COLORS.aqua} />
+            <StatCard label="מראש" value={fmtILS(totals.prepaid)} icon={Wallet} />
+            {totals.pending > 0 && <StatCard label="ממתינות לתשלום" value={totals.pending} icon={Clock3} color={COLORS.red} />}
+            {totals.exempt > 0 && <StatCard label="פטורות (כלה)" value={totals.exempt} icon={Gift} color={COLORS.aqua} />}
+          </div>
 
-      {/* Detail table */}
-      <Table
-        headers={["תאריך", "שעה", "בלנית", "סוג", "תשלום", "סכום"]}
-        rows={filtered.map((e) => [
-          fmtDate(e.date),
-          e.time || "—",
-          e.staffName || "—",
-          durLabel(e),
-          e.status === "exempt" ? "פטורה" : e.status === "pending" ? "⏳ ממתינה" : "✓ שולם",
-          fmtILS((e.cash || 0) + (e.credit || 0) + (e.prepaid || 0)),
-        ])}
-        empty="אין רשומות בתקופה זו."
-      />
+          {/* Table */}
+          <Table
+            headers={["תאריך", "שעה", ...(showMikveh ? ["מקווה"] : []), "בלנית", "סוג", "תשלום", "סכום"]}
+            rows={filtered.map((e) => [
+              fmtDate(e.date),
+              e.time || "—",
+              ...(showMikveh ? [e.mikvehName] : []),
+              e.staffName || "—",
+              durLabel(e),
+              e.status === "exempt" ? "פטורה" : e.status === "pending" ? "⏳ ממתינה" : "✓ שולם",
+              fmtILS((e.cash || 0) + (e.credit || 0) + (e.prepaid || 0)),
+            ])}
+            empty="אין רשומות בתקופה זו."
+          />
+        </>
+      )}
     </Card>
   );
 }
