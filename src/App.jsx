@@ -976,6 +976,8 @@ function KioskDippers({ data, staffName, flash }) {
   const [payAmount, setPayAmount] = useState("");
   const [label, setLabel] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [localLabels, setLocalLabels] = useState({});
+  const updateLabel = (id, lbl) => setLocalLabels((prev) => ({ ...prev, [id]: lbl }));
 
   const durObj = DURATION_OPTIONS.find((d) => d.id === dur);
   const canSubmit = dur && pay;
@@ -1076,17 +1078,26 @@ function KioskDippers({ data, staffName, flash }) {
       </Card>
 
       {todayEntries.length > 0 && (
-        <Card title={`טובלות במשמרת (${todayCount})`} icon={Users}
-          right={
-            <div style={{ fontSize: 12, color: COLORS.teal, textAlign: "left" }}>
-              {todayCash > 0 && <div>מזומן: <b>{fmtILS(todayCash)}</b></div>}
-              {todayCredit > 0 && <div>אשראי: <b>{fmtILS(todayCredit)}</b></div>}
-              {todayPrepaid > 0 && <div>מראש: <b>{fmtILS(todayPrepaid)}</b></div>}
-            </div>
-          }>
+        <Card title={`טובלות במשמרת (${todayCount})`} icon={Users}>
+          {/* Summary bar */}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14, paddingBottom: 14, borderBottom: `1px solid ${COLORS.aqua}22` }}>
+            {[
+              { label: "שולם", value: fmtILS(todayCash + todayCredit + todayPrepaid), color: COLORS.teal, show: (todayCash + todayCredit + todayPrepaid) > 0 },
+              { label: "מזומן", value: fmtILS(todayCash), color: COLORS.teal, sub: true, show: todayCash > 0 },
+              { label: "אשראי", value: fmtILS(todayCredit), color: COLORS.teal, sub: true, show: todayCredit > 0 },
+              { label: "מראש", value: fmtILS(todayPrepaid), color: COLORS.teal, sub: true, show: todayPrepaid > 0 },
+              { label: "חוב", value: fmtILS(todayEntries.filter((e) => e.status === "pending").reduce((s) => s + 25, 0)), color: COLORS.red, show: todayEntries.some((e) => e.status === "pending") },
+              { label: "פטורות", value: todayEntries.filter((e) => e.status === "exempt").length, color: COLORS.aqua, show: todayEntries.some((e) => e.status === "exempt") },
+            ].filter((s) => s.show).map((s) => (
+              <div key={s.label} style={{ textAlign: "center", opacity: s.sub ? 0.75 : 1 }}>
+                <div style={{ fontSize: s.sub ? 14 : 16, fontWeight: 800, color: s.color }}>{s.value}</div>
+                <div style={{ fontSize: 10.5, color: "#7a8f8d" }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {todayEntries.map((e) => (
-              <DipperRow key={e.id} entry={e} data={data} staffName={staffName} flash={flash} />
+              <DipperRow key={e.id} entry={e} data={data} staffName={staffName} flash={flash} localLabel={localLabels[e.id]} onSetLabel={updateLabel} />
             ))}
           </div>
         </Card>
@@ -1096,7 +1107,7 @@ function KioskDippers({ data, staffName, flash }) {
 }
 const roundBtn = { width: 52, height: 52, borderRadius: "50%", border: "none", background: "#fff", boxShadow: "0 1px 4px #00000022", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" };
 
-function DipperRow({ entry, data, staffName, flash }) {
+function DipperRow({ entry, data, staffName, flash, localLabel, onSetLabel }) {
   const [editing, setEditing] = useState(false);
   const [pay, setPay] = useState(
     entry.status === "exempt" ? "exempt"
@@ -1108,9 +1119,11 @@ function DipperRow({ entry, data, staffName, flash }) {
   );
   const [payAmount, setPayAmount] = useState(String(entry.cash || entry.credit || entry.prepaid || ""));
   const [dur, setDur] = useState(entry.duration || "dip");
+  const [labelInput, setLabelInput] = useState(localLabel || entry.tempLabel || "");
 
   const durLabel = DURATION_OPTIONS.find((d) => d.id === dur)?.label || dur;
   const statusColor = entry.status === "pending" ? COLORS.gold : entry.status === "exempt" ? COLORS.aqua : COLORS.teal;
+  const displayLabel = localLabel || entry.tempLabel || "";
 
   const save = () => {
     const amount = parseFloat(payAmount) || 0;
@@ -1122,6 +1135,7 @@ function DipperRow({ entry, data, staffName, flash }) {
       prepaid: pay === "paid-prepaid" ? amount : 0,
     };
     data.setDippersLog((prev) => prev.map((e) => e.id === entry.id ? { ...e, ...patch } : e));
+    if (labelInput.trim() !== (localLabel || "")) onSetLabel(entry.id, labelInput.trim());
     data.addAudit(staffName, "עריכת רשומת טובלת", `שעה ${entry.time} → ${payStatusLabel({ ...entry, ...patch })}`);
     flash("עודכן ✓");
     setEditing(false);
@@ -1132,7 +1146,8 @@ function DipperRow({ entry, data, staffName, flash }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div>
           <span style={{ fontWeight: 700, fontSize: 13.5 }}>{entry.time}</span>
-          <span style={{ fontSize: 12.5, color: "#7a8f8d", marginRight: 8 }}>· {durLabel}{entry.tempLabel ? ` · ${entry.tempLabel}` : ""}</span>
+          <span style={{ fontSize: 12.5, color: "#7a8f8d", marginRight: 8 }}>· {durLabel}</span>
+          {displayLabel && <span style={{ fontSize: 12, color: COLORS.gold, fontWeight: 600, marginRight: 4 }}>· {displayLabel}</span>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: statusColor }}>{payStatusLabel(entry)}</span>
@@ -1168,6 +1183,9 @@ function DipperRow({ entry, data, staffName, flash }) {
               </Field>
             </div>
           )}
+          <Field label="שם / כינוי זמני (לא נשמר — רק לנוחיות שלך במשמרת הזו)">
+            <input style={inputStyle} value={labelInput} onChange={(e) => setLabelInput(e.target.value)} placeholder='לדוגמה: "שרה מצדדית"' />
+          </Field>
           <button style={btnPrimary} onClick={save}><Check size={14} /> שמירה</button>
         </div>
       )}
@@ -1490,6 +1508,7 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
     { id: "attendance", label: "נוכחות וסידור", icon: CalendarCheck },
     { id: "water", label: "איכות מים", icon: Thermometer },
     { id: "finance", label: "דוחות כספיים", icon: FileSpreadsheet },
+    { id: "dippers-report", label: "דוח טובלות", icon: Users },
     { id: "audit", label: "יומן שינויים", icon: History },
     { id: "tickets", label: "קריאות תפעול", icon: Wrench },
     { id: "permissions", label: "הרשאות", icon: ShieldCheck },
@@ -1531,6 +1550,7 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
       {tab === "attendance" && mikveh && <AdminAttendance data={data} />}
       {tab === "water" && mikveh && <AdminWater data={data} />}
       {tab === "finance" && mikveh && <AdminFinance data={data} />}
+      {tab === "dippers-report" && mikveh && <AdminDippersReport data={data} mikveh={mikveh} />}
       {tab === "audit" && mikveh && <AdminAudit data={data} />}
       {tab === "tickets" && mikveh && <AdminTickets data={data} />}
       {tab === "permissions" && <AdminPermissions adminEmails={adminEmails} setAdminEmails={setAdminEmails} mikvehs={mikvehs} authUser={authUser} />}
@@ -2067,6 +2087,114 @@ function AdminWater({ data }) {
           </ResponsiveContainer>
         </div>
       )}
+    </Card>
+  );
+}
+
+function AdminDippersReport({ data, mikveh }) {
+  const [period, setPeriod] = useState("month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState(todayStr());
+
+  const now = new Date();
+  const filtered = useMemo(() => {
+    let from, to;
+    if (period === "24h") {
+      from = new Date(now.getTime() - 24 * 3600000);
+      to = now;
+    } else if (period === "month") {
+      from = new Date(now.getFullYear(), now.getMonth(), 1);
+      to = now;
+    } else if (period === "year") {
+      from = new Date(now.getFullYear(), 0, 1);
+      to = now;
+    } else {
+      from = customFrom ? new Date(customFrom) : new Date(0);
+      to = customTo ? new Date(customTo + "T23:59:59") : now;
+    }
+    return data.dippersLog.filter((e) => {
+      const d = new Date(e.date + (e.time ? "T" + e.time : ""));
+      return d >= from && d <= to;
+    }).slice().reverse();
+  }, [data.dippersLog, period, customFrom, customTo, now]);
+
+  const totals = filtered.reduce((acc, e) => ({
+    count: acc.count + 1,
+    cash: acc.cash + (e.cash || 0),
+    credit: acc.credit + (e.credit || 0),
+    prepaid: acc.prepaid + (e.prepaid || 0),
+    pending: acc.pending + (e.status === "pending" ? 1 : 0),
+    exempt: acc.exempt + (e.status === "exempt" ? 1 : 0),
+  }), { count: 0, cash: 0, credit: 0, prepaid: 0, pending: 0, exempt: 0 });
+
+  const durLabel = (e) => DURATION_OPTIONS.find((d) => d.id === e.duration)?.label || e.duration || "—";
+
+  const exportCsv = () => {
+    const header = "תאריך,שעה,בלנית,כולל התארגנות,סטטוס תשלום,מזומן,אשראי,מראש\n";
+    const body = filtered.map((e) => [
+      e.date, e.time || "", e.staffName,
+      durLabel(e),
+      e.status === "exempt" ? "פטורה" : e.status === "pending" ? "ממתינה" : "שולם",
+      e.cash || 0, e.credit || 0, e.prepaid || 0,
+    ].join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + header + body], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `דוח-טובלות-${mikveh.name}-${todayStr()}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const PERIODS = [
+    { id: "24h", label: "24 שעות אחרונות" },
+    { id: "month", label: "חודש נוכחי" },
+    { id: "year", label: "שנה נוכחית" },
+    { id: "custom", label: "תקופה בחירה" },
+  ];
+
+  return (
+    <Card title={`דוח טובלות — ${mikveh.name}`} icon={Users}
+      right={<button style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5 }} onClick={exportCsv}><Download size={14} /> ייצוא CSV</button>}>
+
+      {/* Period selector */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        {PERIODS.map((p) => (
+          <button key={p.id} onClick={() => setPeriod(p.id)} style={{
+            ...btnBase(period === p.id ? COLORS.teal : "#fff", period === p.id ? "#fff" : COLORS.ink),
+            fontSize: 13, padding: "8px 13px", border: `1px solid ${period === p.id ? COLORS.teal : "#00000018"}`,
+          }}>{p.label}</button>
+        ))}
+      </div>
+      {period === "custom" && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+          <Field label="מ-"><input type="date" style={{ ...inputStyle, width: "auto" }} value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} /></Field>
+          <Field label="עד"><input type="date" style={{ ...inputStyle, width: "auto" }} value={customTo} onChange={(e) => setCustomTo(e.target.value)} /></Field>
+        </div>
+      )}
+
+      {/* Summary tiles */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+        <StatCard label="טובלות" value={totals.count} icon={Users} />
+        <StatCard label="שולם (מזומן)" value={fmtILS(totals.cash)} icon={Wallet} color={COLORS.gold} />
+        <StatCard label="שולם (אשראי)" value={fmtILS(totals.credit)} icon={Wallet} color={COLORS.aqua} />
+        <StatCard label="שולם מראש" value={fmtILS(totals.prepaid)} icon={Wallet} />
+        {totals.pending > 0 && <StatCard label="ממתינות לתשלום" value={totals.pending} icon={Clock3} color={COLORS.red} />}
+        {totals.exempt > 0 && <StatCard label="פטורות (כלה)" value={totals.exempt} icon={Gift} color={COLORS.aqua} />}
+      </div>
+
+      {/* Detail table */}
+      <Table
+        headers={["תאריך", "שעה", "בלנית", "סוג", "תשלום", "סכום"]}
+        rows={filtered.map((e) => [
+          fmtDate(e.date),
+          e.time || "—",
+          e.staffName || "—",
+          durLabel(e),
+          e.status === "exempt" ? "פטורה" : e.status === "pending" ? "⏳ ממתינה" : "✓ שולם",
+          fmtILS((e.cash || 0) + (e.credit || 0) + (e.prepaid || 0)),
+        ])}
+        empty="אין רשומות בתקופה זו."
+      />
     </Card>
   );
 }
