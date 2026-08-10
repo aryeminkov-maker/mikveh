@@ -1779,6 +1779,12 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
 
   // Attendance state — lives here, no separate component
   const [attendanceDraft, setAttendanceDraft] = useState(null);
+  const attendanceDraftRef = React.useRef(null);
+  const setAttDraft = (val) => {
+    const next = typeof val === "function" ? val(attendanceDraftRef.current) : val;
+    attendanceDraftRef.current = next;
+    setAttDraft(next);
+  };
   const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [attendanceSaved, setAttendanceSaved] = useState(false);
   const [defStaffId, setDefStaffId] = useState("");
@@ -1796,29 +1802,35 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
   useEffect(() => {
     if (!expanded || attendanceDraft !== null) return;
     storage.get(attendanceKey)
-      .then((val) => setAttendanceDraft(val && typeof val === "object" ? val : {}))
-      .catch(() => setAttendanceDraft({}));
+      .then((val) => setAttDraft(val && typeof val === "object" ? val : {}))
+      .catch(() => setAttDraft({}));
   }, [expanded, attendanceKey]);
 
   // Sync form when mikveh changes
   useEffect(() => {
     setForm({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, bathRooms: mikveh.bathRooms ?? 2, showerRooms: mikveh.showerRooms ?? 1, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "", feedbackUrl: mikveh.feedbackUrl || "" });
-    setAttendanceDraft(null); // reset so it reloads for the new mikveh
+    setAttDraft(null); // reset so it reloads for the new mikveh
   }, [mikveh.id]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const saveAll = async () => {
     // Save mikveh form
     mikvehsCtl.updateMikveh(mikveh.id, { ...form, photoUrl: toDirectImageUrl(form.photoUrl) });
-    // Save attendance draft
-    if (attendanceDraft !== null) {
+    // Save attendance — use ref to get latest value regardless of closure timing
+    const latestDraft = attendanceDraftRef.current;
+    if (latestDraft !== null) {
       setAttendanceSaving(true);
       try {
-        await storage.set(attendanceKey, attendanceDraft);
-        data.setDefaultSchedule(() => attendanceDraft);
+        console.log("[saveAll] saving attendance key:", attendanceKey, "draft:", JSON.stringify(latestDraft));
+        await storage.set(attendanceKey, latestDraft);
+        const verify = await storage.get(attendanceKey);
+        console.log("[saveAll] verify read-back:", JSON.stringify(verify));
+        data.setDefaultSchedule(() => latestDraft);
         setAttendanceSaved(true);
         setTimeout(() => setAttendanceSaved(false), 3000);
-      } catch (e) { /* silent */ }
+      } catch (e) {
+        console.error("[saveAll] attendance save error:", e);
+      }
       setAttendanceSaving(false);
     }
   };
@@ -1832,7 +1844,7 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
   const copyPairing = async () => { try { await navigator.clipboard.writeText(pairingUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (e) {} };
 
   // Attendance patch helper
-  const patchAtt = (fn) => setAttendanceDraft((prev) => ({ ...fn(prev || {}) }));
+  const patchAtt = (fn) => setAttDraft((prev) => ({ ...fn(prev || {}) }));
   const ad = attendanceDraft || {};
   const defaultShifts = ad.__defaultShifts || (ad.__default ? [{ staffId: ad.__default, start: "", end: "" }] : []);
 
