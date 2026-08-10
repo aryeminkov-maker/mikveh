@@ -13,7 +13,7 @@ import {
   Thermometer, TrendingUp, Download, RefreshCw, Building2, ShieldCheck,
   Link2, Copy, Tablet, Smartphone, Settings, Trash2, KeyRound, Loader2, Navigation,
   Bell, Info, Bath, Timer, Gift, Clock3,
-  Image, ImagePlus, ArrowRight
+  Image, ImagePlus, ArrowRight, MessageSquare
 } from "lucide-react";
 
 /* ============================================================
@@ -63,6 +63,10 @@ function toDirectImageUrl(url) {
 
   // Google Drive: already in uc?export format — pass through
   if (s.includes('drive.google.com/uc')) return s;
+
+  // Imgur share page: https://imgur.com/XXXXX → https://i.imgur.com/XXXXX.jpeg
+  const imgurPage = s.match(/^https?:\/\/(?:www\.)?imgur\.com\/([a-zA-Z0-9]+)\s*$/);
+  if (imgurPage) return `https://i.imgur.com/${imgurPage[1]}.jpeg`;
 
   // Dropbox: change dl=0 → raw=1 for direct display
   if (s.includes('dropbox.com')) return s.replace('dl=0', 'raw=1').replace('www.dropbox.com', 'dl.dropboxusercontent.com');
@@ -131,7 +135,7 @@ const OPENING_HOURS = [
 ];
 
 const DEFAULT_MIKVEHS = [
-  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, price: "25", paymentUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
+  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, bathRooms: 2, showerRooms: 1, price: "25", paymentUrl: "", manualLoad: null, feedbackUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
 ];
 
 /* ============================================================
@@ -172,7 +176,7 @@ function useMikvehs() {
   const [list, setList] = useShared("mikvehs", DEFAULT_MIKVEHS);
 
   const addMikveh = useCallback((name, address) => {
-    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, price: "25", paymentUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
+    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, bathRooms: 2, showerRooms: 1, price: "25", paymentUrl: "", manualLoad: null, feedbackUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
   }, [setList]);
 
   const updateMikveh = useCallback((id, patch) => {
@@ -247,7 +251,7 @@ export default function MikvehSystem() {
       <FontLoader />
       <TopBar route={topRoute} navigate={navigate} />
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 16px 48px" }}>
-        {topRoute === "kiosk" && <KioskApp mikvehs={mikvehs.list} />}
+        {topRoute === "kiosk" && <KioskApp mikvehs={mikvehs.list} mikvehsCtl={mikvehs} />}
         {topRoute === "admin" && <AdminApp mikvehsCtl={mikvehs} />}
         {topRoute === "public" && <PublicApp mikvehs={mikvehs.list} />}
       </div>
@@ -371,7 +375,7 @@ function SetupMessage({ title, text, action, bad }) {
    ============================================================ */
 function useSystemData(mikvehId) {
   const k = (base) => `${base}:${mikvehId || "unassigned"}`;
-  const [staff, setStaff, staffLoaded] = useShared(k("staff"), DEFAULT_STAFF);
+  const [staff, setStaff, staffLoaded] = useShared("staff:global", DEFAULT_STAFF);
   const [checklist, setChecklist] = useShared(k("checklist-by-date"), {});
   const [dippersLog, setDippersLog] = useShared(k("dippers-log"), []);
   const [inventory, setInventory] = useShared(k("inventory"), DEFAULT_INVENTORY);
@@ -427,7 +431,7 @@ function useStaffEmailApprovals(mikvehs, email) {
   return [approvals, loading];
 }
 
-function KioskApp({ mikvehs }) {
+function KioskApp({ mikvehs, mikvehsCtl }) {
   const [deviceMikvehId] = useState(pairedMikvehId());
   const [authUser, authLoading] = useAuthUser();
   const [kioskEmails] = useShared("kiosk-emails", []);
@@ -439,9 +443,13 @@ function KioskApp({ mikvehs }) {
 
   const deviceMikveh = mikvehs.find((m) => m.id === deviceMikvehId);
 
+  const enrichMikveh = (m) => mikvehsCtl
+    ? { ...m, onManualLoad: (level) => mikvehsCtl.updateMikveh(m.id, { manualLoad: level }) }
+    : m;
+
   // --- Path A: this device was permanently paired to one mikveh (tablet) ---
   if (deviceMikveh) {
-    return <KioskShell mikveh={deviceMikveh} presetStaffName={null} personalPhone={false}
+    return <KioskShell mikveh={enrichMikveh(deviceMikveh)} presetStaffName={null} personalPhone={false}
       onLeaveDevice={() => { unpairDevice(); window.location.reload(); }} />;
   }
   if (deviceMikvehId && !deviceMikveh) {
@@ -501,7 +509,7 @@ function KioskApp({ mikvehs }) {
   const mikveh = mikvehs.find((m) => m.id === activeChoice.mikvehId);
   if (!mikveh) return <SetupMessage bad title="המקווה לא נמצא" text="ייתכן שהמקווה שאושרת עבורו הוסר. יש לפנות למנהל/ת." />;
 
-  return <KioskShell mikveh={mikveh} presetStaffName={activeChoice.staffName} personalPhone={true}
+  return <KioskShell mikveh={enrichMikveh(mikveh)} presetStaffName={activeChoice.staffName} personalPhone={true}
     onLeaveDevice={() => signOutUser()} />;
 }
 
@@ -589,8 +597,10 @@ function KioskNotApproved({ email }) {
 function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
   const data = useSystemData(mikveh.id);
   const [current, setCurrent] = useState(null);
-  const [tab, setTab] = useState("checklist");
+  const [tab, setTab] = useState(personalPhone ? "dippers" : "dippers");
   const [toast, setToast] = useState(null);
+  const [shiftModal, setShiftModal] = useState(null); // null | "close" | "transfer"
+  const [transferTo, setTransferTo] = useState("");
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2600); };
 
@@ -600,7 +610,6 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
     data.addAudit(staffMember.name, "כניסה למשמרת", "התחברות לטאבלט הבלנית");
   };
 
-  // personal-phone flow: Google already verified identity — log in immediately as the mapped staff name
   useEffect(() => {
     if (personalPhone && presetStaffName && !current) {
       handleLogin({ id: "google:" + presetStaffName, name: presetStaffName });
@@ -608,11 +617,38 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [personalPhone, presetStaffName]);
 
+  const today = todayStr();
+  const todayEntries = data.dippersLog.filter((e) => e.date === today);
+  const totalDippers = todayEntries.length;
+  const totalCash = todayEntries.reduce((s, e) => s + (e.cash || 0), 0);
+  const totalCredit = todayEntries.reduce((s, e) => s + (e.credit || 0), 0);
+  const pendingCount = todayEntries.filter((e) => e.status === "pending").length;
+  const exemptCount = todayEntries.filter((e) => e.status === "exempt").length;
+
+  const closeShift = () => {
+    const todayRec = data.checklist[today] || {};
+    data.setChecklist((prev) => ({ ...prev, [today]: { ...todayRec, closed: true, closedBy: current.name, closedAt: new Date().toISOString() } }));
+    data.addAudit(current.name, "סגירת משמרת", `${totalDippers} טובלות · מזומן ${fmtILS(totalCash)}`);
+    setShiftModal("summary");
+  };
+
+  const transferShift = () => {
+    if (!transferTo) return;
+    const nextStaff = data.staff.find((s) => s.id === transferTo);
+    if (!nextStaff) return;
+    data.addAudit(current.name, "העברת משמרת", `הועברה ל${nextStaff.name}`);
+    data.setLoginLog((prev) => [{ id: uid(), staffId: nextStaff.id, staffName: nextStaff.name, ts: new Date().toISOString() }, ...prev].slice(0, 400));
+    setCurrent(nextStaff);
+    setShiftModal(null);
+    setTransferTo("");
+    flash(`המשמרת הועברה ל${nextStaff.name} ✓`);
+  };
+
   const handleLogout = () => {
     if (current) data.addAudit(current.name, "יציאה ממשמרת", "החלפת בלנית");
     setCurrent(null);
-    setTab("checklist");
-    if (personalPhone) onLeaveDevice(); // signs out of Google entirely
+    setTab("dippers");
+    if (personalPhone) onLeaveDevice();
   };
 
   if (!current) {
@@ -621,54 +657,113 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
   }
 
   const kioskTabs = [
+    { id: "dippers", label: "טובלות", icon: Wallet },
     { id: "checklist", label: "פתיחה/סגירה", icon: ClipboardList },
-    { id: "dippers", label: "טובלות ותשלומים", icon: Wallet },
     { id: "inventory", label: "מלאי", icon: Package },
-    { id: "notes", label: "פתקים למשמרת", icon: StickyNote },
+    { id: "notes", label: "פתקים", icon: StickyNote },
     { id: "malfunctions", label: "תקלות", icon: Wrench },
   ];
 
   return (
-    <div style={{ paddingTop: 18, position: "relative" }}>
-      {/* status bar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.paper, borderRadius: 14, padding: "12px 16px", marginBottom: 14, border: `1px solid ${COLORS.aqua}22`, flexWrap: "wrap", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 38, height: 38, borderRadius: "50%", background: COLORS.aquaLight, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: COLORS.teal }}>
+    <div style={{ paddingTop: 12, position: "relative" }}>
+      {/* status bar — compact for mobile */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.teal, borderRadius: 14, padding: "10px 14px", marginBottom: 12, flexWrap: "wrap", gap: 8, color: "#fff" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#ffffff33", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 }}>
             {current.name.slice(0, 1)}
           </div>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 15.5 }}>{current.name} <span style={{ fontWeight: 500, fontSize: 12, color: COLORS.teal }}>· {mikveh.name}</span></div>
-            <div style={{ fontSize: 12.5, color: COLORS.teal }}>{fmtDate(todayStr())} · {weekdayOf(todayStr())} · {nowTime()}</div>
+            <div style={{ fontWeight: 700, fontSize: 14.5 }}>{current.name}</div>
+            <div style={{ fontSize: 11.5, opacity: 0.8 }}>{mikveh.name} · {nowTime()}</div>
           </div>
         </div>
-        <button onClick={handleLogout} style={btnGhost}>
-          <LogOut size={15} /> {personalPhone ? "התנתקות" : "החלף בלנית"}
-        </button>
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+          <button onClick={() => setShiftModal("transfer")} style={{ ...btnBase("#ffffff22", "#fff"), fontSize: 12.5, padding: "7px 12px", border: "1px solid #ffffff44" }}>
+            <Users size={13} /> העברת משמרת
+          </button>
+          <button onClick={() => setShiftModal("close")} style={{ ...btnBase("#ef444433", "#fca5a5"), fontSize: 12.5, padding: "7px 12px", border: "1px solid #ef444455" }}>
+            <Lock size={13} /> סגירת משמרת
+          </button>
+        </div>
       </div>
 
-      {/* tabs */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+      {/* tabs — bigger touch targets */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
         {kioskTabs.map((t) => {
           const Icon = t.icon;
           const active = tab === t.id;
           return (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
-              display: "flex", alignItems: "center", gap: 8, padding: "13px 18px", borderRadius: 13, border: "none",
-              cursor: "pointer", fontWeight: 700, fontSize: 14.5, whiteSpace: "nowrap",
+              display: "flex", alignItems: "center", gap: 7, padding: "14px 18px", borderRadius: 13, border: "none",
+              cursor: "pointer", fontWeight: 700, fontSize: 15, whiteSpace: "nowrap",
               background: active ? COLORS.teal : COLORS.paper, color: active ? "#fff" : COLORS.ink,
               boxShadow: active ? "0 2px 8px #17565144" : "0 1px 2px #0000000f",
+              flex: "1 1 auto", justifyContent: "center",
             }}>
-              <Icon size={17} /> {t.label}
+              <Icon size={18} /> {t.label}
             </button>
           );
         })}
       </div>
 
+      {tab === "dippers" && <KioskDippersWithStatus data={data} mikveh={mikveh} staffName={current.name} navigate={setTab} flash={flash} />}
       {tab === "checklist" && <KioskChecklist data={data} staffName={current.name} flash={flash} />}
-      {tab === "dippers" && <KioskDippers data={data} staffName={current.name} flash={flash} />}
       {tab === "inventory" && <KioskInventory data={data} staffName={current.name} flash={flash} />}
       {tab === "notes" && <KioskNotes data={data} staffName={current.name} flash={flash} />}
       {tab === "malfunctions" && <KioskMalfunctions data={data} staffName={current.name} flash={flash} />}
+
+      {/* Transfer shift modal */}
+      {shiftModal === "transfer" && (
+        <KioskModal onClose={() => setShiftModal(null)}>
+          <Users size={26} color={COLORS.teal} style={{ marginBottom: 8 }} />
+          <div className="font-display" style={{ fontWeight: 700, fontSize: 18, marginBottom: 6 }}>העברת משמרת</div>
+          <p style={{ fontSize: 13.5, color: "#3a5250", marginBottom: 14 }}>בחרי את הבלנית שמחליפה. מספר הטובלות שנרשמו ממשיך להצטבר.</p>
+          <select style={{ ...inputStyle, marginBottom: 14, width: "100%" }} value={transferTo} onChange={(e) => setTransferTo(e.target.value)}>
+            <option value="">בחרי בלנית…</option>
+            {data.staff.filter((s) => s.id !== current.id).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button style={{ ...btnPrimary, flex: 1, justifyContent: "center", opacity: transferTo ? 1 : 0.4 }} onClick={transferShift} disabled={!transferTo}>
+              <Check size={16} /> העברה
+            </button>
+            <button style={btnGhost} onClick={() => setShiftModal(null)}>ביטול</button>
+          </div>
+        </KioskModal>
+      )}
+
+      {/* Close shift confirmation */}
+      {shiftModal === "close" && (
+        <KioskModal onClose={() => setShiftModal(null)}>
+          <Lock size={26} color={COLORS.red} style={{ marginBottom: 8 }} />
+          <div className="font-display" style={{ fontWeight: 700, fontSize: 18, marginBottom: 6 }}>סגירת משמרת</div>
+          <p style={{ fontSize: 13.5, color: "#3a5250", marginBottom: 14 }}>לאחר הסגירה יוצג סיכום המשמרת.</p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button style={{ ...btnDanger, flex: 1, justifyContent: "center" }} onClick={closeShift}><Lock size={15} /> סגירה</button>
+            <button style={btnGhost} onClick={() => setShiftModal(null)}>ביטול</button>
+          </div>
+        </KioskModal>
+      )}
+
+      {/* Shift summary modal */}
+      {shiftModal === "summary" && (
+        <KioskModal onClose={() => { setShiftModal(null); handleLogout(); }}>
+          <Check size={30} color={COLORS.teal} style={{ marginBottom: 8 }} />
+          <div className="font-display" style={{ fontWeight: 800, fontSize: 20, marginBottom: 16 }}>סיכום משמרת</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18, textAlign: "right" }}>
+            <SummaryRow label="בלנית" value={current.name} />
+            <SummaryRow label="מקווה" value={mikveh.name} />
+            <SummaryRow label="תאריך" value={fmtDate(today)} />
+            <SummaryRow label="סה״כ טובלות" value={totalDippers} bold />
+            <SummaryRow label="מזומן" value={fmtILS(totalCash)} />
+            <SummaryRow label="אשראי" value={fmtILS(totalCredit)} />
+            {pendingCount > 0 && <SummaryRow label="ממתינות לתשלום" value={pendingCount} warn />}
+            {exemptCount > 0 && <SummaryRow label="כלות (פטורות)" value={exemptCount} />}
+          </div>
+          <button style={{ ...btnPrimary, width: "100%", justifyContent: "center" }} onClick={() => { setShiftModal(null); handleLogout(); }}>
+            <LogOut size={15} /> סיום וניתוק
+          </button>
+        </KioskModal>
+      )}
 
       <EmergencyButton data={data} staffName={current.name} flash={flash} />
       {toast && <Toast text={toast} />}
@@ -704,6 +799,25 @@ function Card({ title, icon: Icon, children, right }) {
         {right}
       </div>
       {children}
+    </div>
+  );
+}
+
+function KioskModal({ children, onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#00000066", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, padding: 28, maxWidth: 420, width: "100%", textAlign: "center", boxShadow: "0 8px 40px #0004" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value, bold, warn }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "6px 0", borderBottom: "1px solid #f0f0f0" }}>
+      <span style={{ color: "#7a8f8d" }}>{label}</span>
+      <span style={{ fontWeight: bold ? 800 : 600, color: warn ? COLORS.red : COLORS.ink }}>{value}</span>
     </div>
   );
 }
@@ -761,6 +875,109 @@ function KioskLogin({ staff, onLogin, mikveh, onLeaveDevice }) {
         <button onClick={onLeaveDevice} style={{ marginTop: 18, background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#9ab0ad", display: "flex", alignItems: "center", gap: 4, margin: "18px auto 0" }}>
           <Settings size={12} /> ניתוק המכשיר ממקווה זה
         </button>
+      </div>
+    </div>
+  );
+}
+
+function KioskDippersWithStatus({ data, mikveh, navigate, flash, staffName }) {
+  const today = todayStr();
+  const todayRec = data.checklist[today];
+  const statusColor = todayRec?.closed ? "#7a8f8d" : todayRec?.opened ? COLORS.teal : COLORS.red;
+  const statusText = todayRec?.closed ? "משמרת נסגרה" : todayRec?.opened ? "משמרת פתוחה" : "טרם נפתח";
+
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, background: COLORS.paper, borderRadius: 14, padding: "12px 16px", marginBottom: 14, border: `1.5px solid ${statusColor}44` }}>
+        <div style={{ width: 10, height: 10, borderRadius: "50%", background: statusColor, flexShrink: 0 }} />
+        <span style={{ fontWeight: 700, fontSize: 15, color: statusColor }}>{statusText}</span>
+        {!todayRec?.opened && (
+          <button onClick={() => navigate("checklist")} style={{ ...btnPrimary, fontSize: 13, padding: "7px 14px", marginRight: "auto" }}>
+            <Unlock size={14} /> פתיחת משמרת
+          </button>
+        )}
+        {todayRec?.opened && !todayRec?.closed && todayRec?.chlorine && (
+          <span style={{ fontSize: 12.5, color: COLORS.teal, marginRight: "auto" }}>כלור: {todayRec.chlorine} ppm · טמפ׳: {todayRec.temp}°</span>
+        )}
+      </div>
+      {todayRec?.dailyNote && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.goldLight, borderRadius: 12, padding: "10px 14px", marginBottom: 14, fontSize: 13.5 }}>
+          <Bell size={15} color={COLORS.gold} style={{ flexShrink: 0 }} />{todayRec.dailyNote}
+        </div>
+      )}
+      <KioskDippers data={data} staffName={staffName} flash={flash} mikveh={mikveh} />
+    </>
+  );
+}
+
+function KioskHome({ data, mikveh, staffName, navigate, flash }) {
+  const today = todayStr();
+  const todayRec = data.checklist[today];
+  const todayEntries = data.dippersLog.filter((e) => e.date === today);
+  const todayCount = todayEntries.length;
+  const pendingCount = todayEntries.filter((e) => e.status === "pending").length;
+  const openTickets = data.malfunctions.filter((m) => m.status !== "טופל").length;
+  const unresolvedNotes = data.notes.filter((n) => !n.resolved).length;
+  const lowStock = Object.values(data.inventory).filter((i) => i.qty <= i.threshold).length;
+
+  const statusColor = todayRec?.closed ? "#7a8f8d" : todayRec?.opened ? COLORS.teal : COLORS.red;
+  const statusText = todayRec?.closed ? "משמרת נסגרה" : todayRec?.opened ? "משמרת פתוחה" : "טרם נפתח";
+
+  const tiles = [
+    { id: "dippers", label: "טובלות", icon: Wallet, badge: todayCount > 0 ? todayCount : null, badgeColor: COLORS.teal, warn: pendingCount > 0, warnText: `${pendingCount} ממתינות לתשלום`, primary: true },
+    { id: "checklist", label: "פתיחה/סגירה", icon: ClipboardList, badge: null },
+    { id: "notes", label: "פתקים", icon: StickyNote, badge: unresolvedNotes || null, badgeColor: COLORS.gold },
+    { id: "malfunctions", label: "תקלות", icon: Wrench, badge: openTickets || null, badgeColor: COLORS.red },
+    { id: "inventory", label: "מלאי", icon: Package, badge: lowStock || null, badgeColor: COLORS.gold, warnText: lowStock ? `${lowStock} פריטים בחוסר` : null },
+  ];
+
+  return (
+    <div>
+      {/* Shift status banner */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, background: COLORS.paper, borderRadius: 14, padding: "14px 18px", marginBottom: 18, border: `1.5px solid ${statusColor}44` }}>
+        <div style={{ width: 12, height: 12, borderRadius: "50%", background: statusColor, flexShrink: 0 }} />
+        <span style={{ fontWeight: 700, fontSize: 15, color: statusColor }}>{statusText}</span>
+        {!todayRec?.opened && (
+          <button onClick={() => navigate("checklist")} style={{ ...btnPrimary, fontSize: 13, padding: "7px 14px", marginRight: "auto" }}>
+            <Unlock size={14} /> פתיחת משמרת
+          </button>
+        )}
+        {todayRec?.opened && !todayRec?.closed && todayRec?.chlorine && (
+          <span style={{ fontSize: 12.5, color: COLORS.teal, marginRight: "auto" }}>כלור: {todayRec.chlorine} ppm · טמפ׳: {todayRec.temp}°</span>
+        )}
+      </div>
+
+      {/* Daily note if exists */}
+      {todayRec?.dailyNote && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.goldLight, borderRadius: 12, padding: "10px 14px", marginBottom: 14, fontSize: 13.5 }}>
+          <Bell size={15} color={COLORS.gold} style={{ flexShrink: 0 }} />
+          {todayRec.dailyNote}
+        </div>
+      )}
+
+      {/* Navigation tiles */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
+        {tiles.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button key={t.id} onClick={() => navigate(t.id)} style={{
+              textAlign: "right", background: t.primary ? COLORS.teal : COLORS.paper, color: t.primary ? "#fff" : COLORS.ink,
+              border: `1.5px solid ${t.primary ? COLORS.teal : COLORS.aqua}33`, borderRadius: 16,
+              padding: 18, cursor: "pointer", position: "relative",
+            }}>
+              {t.badge != null && (
+                <div style={{
+                  position: "absolute", top: 12, left: 12, background: t.badgeColor || COLORS.teal, color: "#fff",
+                  borderRadius: "50%", width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 12, fontWeight: 800,
+                }}>{t.badge}</div>
+              )}
+              <Icon size={28} color={t.primary ? "#fff" : COLORS.teal} style={{ marginBottom: 10 }} />
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{t.label}</div>
+              {t.warnText && <div style={{ fontSize: 11.5, marginTop: 4, color: t.primary ? "#ffffffcc" : COLORS.gold, fontWeight: 600 }}>{t.warnText}</div>}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -859,183 +1076,277 @@ function ToggleRow({ label, checked, onChange }) {
   );
 }
 
-function KioskDippers({ data, staffName, flash }) {
-  const [count, setCount] = useState(0);
-  const [cash, setCash] = useState("");
-  const [credit, setCredit] = useState("");
-  const [prepaid, setPrepaid] = useState("");
-  const [billGiven, setBillGiven] = useState("");
-  const [amountDue, setAmountDue] = useState("");
-  const [listening, setListening] = useState(false);
-  const [duration, setDuration] = useState("dip"); // "dip" | "prep"
-  const [payMode, setPayMode] = useState("paid"); // "paid" | "pending"
-  const [pendingType, setPendingType] = useState("later"); // "later" | "exempt"
-  const [tempLabel, setTempLabel] = useState("");
-  const [localLabels, setLocalLabels] = useState({}); // entryId -> nickname — NEVER persisted, lost on refresh, staff convenience only
+const DURATION_OPTIONS = [
+  { id: "dip", label: "רק טבילה", minutes: 20 },
+  { id: "prep", label: "גם התארגנות", minutes: 60 },
+  { id: "bride", label: "כלה", minutes: 120 },
+  { id: "custom", label: "זמן אחר", minutes: null },
+];
+const PAYMENT_STATUS = [
+  { id: "paid-cash", label: "מזומן", color: COLORS.teal },
+  { id: "paid-credit", label: "אשראי", color: COLORS.teal },
+  { id: "paid-prepaid", label: "שולם מראש", color: COLORS.teal },
+  { id: "pending", label: "תשלם בהמשך", color: COLORS.gold },
+  { id: "exempt", label: "כלה בשנה הראשונה", color: COLORS.aqua },
+];
 
+function payStatusLabel(entry) {
+  if (entry.status === "exempt") return "כלה בשנה הראשונה";
+  if (entry.status === "pending") return "ממתינה לתשלום";
+  if (entry.cash > 0) return `מזומן ${fmtILS(entry.cash)}`;
+  if (entry.credit > 0) return `אשראי ${fmtILS(entry.credit)}`;
+  if (entry.prepaid > 0) return `שולם מראש ${fmtILS(entry.prepaid)}`;
+  return "שולם";
+}
+
+function KioskDippers({ data, staffName, flash, mikveh }) {
   const today = todayStr();
   const todayEntries = data.dippersLog.filter((e) => e.date === today);
-  const todayTotal = todayEntries.reduce((s, e) => s + e.count, 0);
-  const todayCash = todayEntries.filter((e) => (e.status || "paid") === "paid").reduce((s, e) => s + (e.cash || 0), 0);
-  const pendingEntries = todayEntries.filter((e) => e.status === "pending");
+  const activeEntries = todayEntries.filter((e) => !e.exitedAt);
+  const todayCash = todayEntries.reduce((s, e) => s + (e.cash || 0), 0);
+  const todayCredit = todayEntries.reduce((s, e) => s + (e.credit || 0), 0);
+  const todayPrepaid = todayEntries.reduce((s, e) => s + (e.prepaid || 0), 0);
+  const pendingCount = todayEntries.filter((e) => e.status === "pending").length;
+  const exemptCount = todayEntries.filter((e) => e.status === "exempt").length;
 
-  const change = (parseFloat(billGiven) || 0) - (parseFloat(amountDue) || 0);
+  const [dur, setDur] = useState("");
+  const [pay, setPay] = useState("");
+  const [payAmount, setPayAmount] = useState("25");
+  const [entryTime, setEntryTime] = useState(nowTime());
+  const [localLabels, setLocalLabels] = useState({});
+  const updateLabel = (id, lbl) => setLocalLabels((prev) => ({ ...prev, [id]: lbl }));
 
-  const resetForm = () => {
-    setCount(0); setCash(""); setCredit(""); setPrepaid(""); setPayMode("paid"); setPendingType("later"); setTempLabel(""); setDuration("dip");
-  };
+  const canSubmit = dur && pay;
 
-  const submitVisit = () => {
-    if (count < 1) { flash("נא לבחור מספר טובלות"); return; }
-    const id = uid();
-    const base = { id, date: today, time: nowTime(), staffName, count, duration };
-    let entry;
-    if (payMode === "paid") {
-      entry = { ...base, status: "paid", cash: parseFloat(cash) || 0, credit: parseFloat(credit) || 0, prepaid: parseFloat(prepaid) || 0 };
-      data.addAudit(staffName, "רישום טובלות ותשלום", `${count} טובלות · מזומן ${fmtILS(entry.cash)} · אשראי ${fmtILS(entry.credit)} · מראש ${fmtILS(entry.prepaid)}`);
-    } else if (pendingType === "exempt") {
-      entry = { ...base, status: "exempt", cash: 0, credit: 0, prepaid: 0 };
-      data.addAudit(staffName, "רישום טובלות — כלה פטורה מתשלום", `${count} טובלות`);
-    } else {
-      entry = { ...base, status: "pending", cash: 0, credit: 0, prepaid: 0 };
-      data.addAudit(staffName, "רישום טובלות — תשלום ממתין", `${count} טובלות · שעת כניסה ${base.time}`);
-      if (tempLabel.trim()) setLocalLabels((prev) => ({ ...prev, [id]: tempLabel.trim() }));
-    }
-    data.setDippersLog((prev) => [entry, ...prev]);
-    flash("נרשם בהצלחה ✓");
-    resetForm();
-  };
-
-  const completePending = (entryId, method, amount) => {
-    data.setDippersLog((prev) => prev.map((e) => e.id === entryId ? { ...e, status: "paid", [method]: (parseFloat(amount) || 0) } : e));
-    data.addAudit(staffName, "השלמת תשלום ממתין", `${fmtILS(amount)} (${method === "cash" ? "מזומן" : method === "credit" ? "אשראי" : "מראש"})`);
-    setLocalLabels((prev) => { const next = { ...prev }; delete next[entryId]; return next; });
-    flash("התשלום הושלם ✓");
-  };
-
-  const depositCash = () => {
-    data.addAudit(staffName, "הפקדת קופה בסוף משמרת", `סה״כ מזומן שהופקד: ${fmtILS(todayCash)}`);
-    flash("הפקדת הקופה נרשמה ✓");
-  };
-
-  const startVoice = () => {
-    const SR = window.webkitSpeechRecognition || window.SpeechRecognition;
-    if (!SR) { flash("זיהוי קולי אינו נתמך בדפדפן זה"); return; }
-    const rec = new SR();
-    rec.lang = "he-IL";
-    rec.onstart = () => setListening(true);
-    rec.onend = () => setListening(false);
-    rec.onerror = () => { setListening(false); flash("לא הצלחתי לשמוע, נסי שוב"); };
-    rec.onresult = (e) => {
-      const text = e.results[0][0].transcript;
-      const numMatch = text.match(/(\d+)\s*טובלות/);
-      const cashMatch = text.match(/(\d+)\s*.{0,3}\s*ח\s*מזומן/) || text.match(/מזומן\s*(\d+)/) || text.match(/(\d+)/);
-      if (numMatch) setCount(parseInt(numMatch[1], 10));
-      if (cashMatch) setCash(cashMatch[1]);
-      flash(`זוהה: "${text}"`);
+  const submit = () => {
+    if (!canSubmit) return;
+    const durObj = DURATION_OPTIONS.find((d) => d.id === dur);
+    const amount = parseFloat(payAmount) || 0;
+    const entry = {
+      id: uid(), date: today, time: entryTime, staffName, count: 1, duration: dur,
+      minutes: durObj?.minutes || 20,
+      status: pay.startsWith("paid") ? "paid" : pay,
+      cash: pay === "paid-cash" ? amount : 0,
+      credit: pay === "paid-credit" ? amount : 0,
+      prepaid: pay === "paid-prepaid" ? amount : 0,
+      tempLabel: "",
     };
-    rec.start();
+    data.setDippersLog((prev) => [entry, ...prev]);
+    data.addAudit(staffName, "רישום טובלת", `${durObj?.label || dur} · ${payStatusLabel(entry)}`);
+    flash("נרשם ✓");
+    setDur(""); setPay(""); setPayAmount("25"); setEntryTime(nowTime());
   };
+
+  const DUR_BTNS = [
+    { id: "dip",   label: "רק טבילה",       sub: "~20′", minutes: 20 },
+    { id: "prep",  label: "גם התארגנות",   sub: "~60′", minutes: 60 },
+    { id: "bride", label: "כלה",             sub: "~120′", minutes: 120 },
+  ];
+  const PAY_BTNS = [
+    { id: "paid-cash",    label: "מזומן",         color: COLORS.teal },
+    { id: "paid-credit",  label: "אשראי",          color: COLORS.teal },
+    { id: "paid-prepaid", label: "מראש",            color: COLORS.teal },
+    { id: "pending",      label: "תשלם בהמשך",    color: COLORS.gold },
+    { id: "exempt",       label: "כלה בשנה הראשונה",   color: "#7c3aed" },
+  ];
 
   return (
     <>
-      <Card title="ספירת טובלות" icon={Users} right={<div style={{ fontSize: 12.5, color: COLORS.teal }}>סה״כ היום: <b>{todayTotal}</b> · מזומן: <b>{fmtILS(todayCash)}</b></div>}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 22, marginBottom: 14 }}>
-          <button onClick={() => setCount((c) => Math.max(0, c - 1))} style={roundBtn}><Minus size={20} /></button>
-          <div style={{ fontSize: 44, fontWeight: 800, minWidth: 70, textAlign: "center", fontFamily: "'Heebo'" }}>{count}</div>
-          <button onClick={() => setCount((c) => c + 1)} style={{ ...roundBtn, background: COLORS.teal, color: "#fff" }}><Plus size={20} /></button>
-        </div>
-        <button onClick={startVoice} style={{ ...btnGhost, margin: "0 auto 16px", display: "flex" }}>
-          <Mic size={16} color={listening ? COLORS.red : COLORS.teal} /> {listening ? "מקשיבה…" : "הזנה קולית"}
-        </button>
-        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-          <button onClick={() => setDuration("dip")} style={{ ...btnBase(duration === "dip" ? COLORS.teal : "#fff", duration === "dip" ? "#fff" : COLORS.ink), fontSize: 13, padding: "9px 14px", border: `1px solid ${COLORS.teal}33` }}>
-            <Timer size={14} /> רק טבילה (~20 ד')
-          </button>
-          <button onClick={() => setDuration("prep")} style={{ ...btnBase(duration === "prep" ? COLORS.teal : "#fff", duration === "prep" ? "#fff" : COLORS.ink), fontSize: 13, padding: "9px 14px", border: `1px solid ${COLORS.teal}33` }}>
-            <Clock3 size={14} /> גם התארגנות (~60 ד')
-          </button>
-        </div>
-      </Card>
-
-      <Card title="אופן תשלום" icon={Wallet}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          <button onClick={() => setPayMode("paid")} style={{ ...btnBase(payMode === "paid" ? COLORS.teal : "#fff", payMode === "paid" ? "#fff" : COLORS.ink), flex: 1, justifyContent: "center", border: `1px solid ${COLORS.teal}33` }}>שולם עכשיו</button>
-          <button onClick={() => setPayMode("pending")} style={{ ...btnBase(payMode === "pending" ? COLORS.teal : "#fff", payMode === "pending" ? "#fff" : COLORS.ink), flex: 1, justifyContent: "center", border: `1px solid ${COLORS.teal}33` }}>טרם שולם</button>
+      {/* ── Add form ── */}
+      <div style={{ background: COLORS.paper, borderRadius: 18, padding: "18px 16px", marginBottom: 14, border: `1px solid ${COLORS.aqua}22` }}>
+        {/* Entry time — small, unobtrusive */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 14, fontSize: 13, color: "#7a8f8d" }}>
+          <span>שעת כניסה</span>
+          <input type="time" value={entryTime} onChange={(e) => setEntryTime(e.target.value)}
+            style={{ border: "none", background: COLORS.seafoam, borderRadius: 8, padding: "4px 10px", fontSize: 13, color: COLORS.ink, fontWeight: 600 }} />
         </div>
 
-        {payMode === "paid" ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 14, marginBottom: 16 }}>
-            <Field label="מזומן (₪)"><input value={cash} onChange={(e) => setCash(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-            <Field label="אשראי (₪)"><input value={credit} onChange={(e) => setCredit(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-            <Field label="שולם מראש באתר (₪)"><input value={prepaid} onChange={(e) => setPrepaid(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-          </div>
-        ) : (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <button onClick={() => setPendingType("later")} style={{ ...btnGhost, flex: 1, justifyContent: "center", background: pendingType === "later" ? COLORS.aquaLight : "transparent" }}>תשלם בהמשך</button>
-              <button onClick={() => setPendingType("exempt")} style={{ ...btnGhost, flex: 1, justifyContent: "center", background: pendingType === "exempt" ? COLORS.aquaLight : "transparent" }}><Gift size={14} /> כלה — פטורה מתשלום</button>
-            </div>
-            {pendingType === "later" && (
-              <Field label="כינוי לזיהוי זמני (אופציונלי — לא נשמר במערכת, רק לזיכרון שלך במשמרת הזו; אפשר גם להסתמך על שעת הכניסה)">
-                <input value={tempLabel} onChange={(e) => setTempLabel(e.target.value)} style={inputStyle} placeholder='לדוגמה: "האישה עם המעיל האדום"' />
-              </Field>
-            )}
+        {/* Duration buttons */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
+          {DUR_BTNS.map((d) => {
+            const active = dur === d.id;
+            return (
+              <button key={d.id} onClick={() => setDur(d.id)} style={{
+                padding: "16px 8px", borderRadius: 14, border: `2px solid ${active ? COLORS.teal : "#e0e8ec"}`,
+                background: active ? COLORS.teal : "#fff", color: active ? "#fff" : COLORS.ink,
+                fontWeight: 700, fontSize: 15, cursor: "pointer", lineHeight: 1.3, textAlign: "center",
+              }}>
+                {d.label}
+                <div style={{ fontSize: 11, fontWeight: 500, opacity: 0.7, marginTop: 2 }}>{d.sub}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Payment buttons */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
+          {PAY_BTNS.map((p) => {
+            const active = pay === p.id;
+            return (
+              <button key={p.id} onClick={() => setPay(p.id)} style={{
+                padding: "14px 4px", borderRadius: 14, border: `2px solid ${active ? p.color : "#e0e8ec"}`,
+                background: active ? p.color : "#fff", color: active ? "#fff" : COLORS.ink,
+                fontWeight: 700, fontSize: 13.5, cursor: "pointer", lineHeight: 1.3, textAlign: "center",
+              }}>
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Amount — only when payment chosen and not pending/exempt */}
+        {pay && pay.startsWith("paid") && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <span style={{ fontSize: 13.5, color: "#7a8f8d" }}>סכום ₪</span>
+            <input type="number" min="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)}
+              inputMode="decimal" style={{ width: 100, border: "2px solid #e0e8ec", borderRadius: 10, padding: "8px 12px", fontSize: 16, fontWeight: 700, textAlign: "center" }} />
           </div>
         )}
-        <button style={btnPrimary} onClick={submitVisit}><Check size={16} /> רישום ביקור</button>
-      </Card>
 
-      {pendingEntries.length > 0 && (
-        <Card title="ממתינות לתשלום" icon={Clock3}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {pendingEntries.map((e) => (
-              <PendingRow key={e.id} entry={e} label={localLabels[e.id]} onComplete={completePending} />
+        {/* Submit */}
+        <button onClick={submit} disabled={!canSubmit} style={{
+          width: "100%", padding: "16px 0", borderRadius: 14, border: "none",
+          background: canSubmit ? COLORS.teal : "#e0e8ec", color: canSubmit ? "#fff" : "#aaa",
+          fontWeight: 800, fontSize: 17, cursor: canSubmit ? "pointer" : "default",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          transition: "background .15s",
+        }}>
+          <Plus size={20} /> רישום טובלת
+        </button>
+      </div>
+
+      {/* ── Dipper list ── */}
+      {todayEntries.length > 0 && (
+        <div style={{ background: COLORS.paper, borderRadius: 16, padding: 16, border: `1px solid ${COLORS.aqua}22` }}>
+          {/* Summary strip */}
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 12, paddingBottom: 12, borderBottom: `1px solid ${COLORS.aqua}22` }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 24, fontWeight: 900, color: COLORS.teal, lineHeight: 1 }}>{todayEntries.length}</div>
+              <div style={{ fontSize: 11, color: "#7a8f8d" }}>טובלות</div>
+            </div>
+            {(todayCash + todayCredit + todayPrepaid) > 0 && (
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 800, color: COLORS.teal, lineHeight: 1 }}>{fmtILS(todayCash + todayCredit + todayPrepaid)}</div>
+                <div style={{ fontSize: 11, color: "#7a8f8d" }}>שולם</div>
+              </div>
+            )}
+            {pendingCount > 0 && <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800, color: COLORS.red, lineHeight: 1 }}>{pendingCount}</div><div style={{ fontSize: 11, color: "#7a8f8d" }}>ממתינות</div></div>}
+            {exemptCount > 0 && <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800, color: "#7c3aed", lineHeight: 1 }}>{exemptCount}</div><div style={{ fontSize: 11, color: "#7a8f8d" }}>פטורות</div></div>}
+            {activeEntries.length > 0 && <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800, color: COLORS.gold, lineHeight: 1 }}>{activeEntries.length}</div><div style={{ fontSize: 11, color: "#7a8f8d" }}>בפנים</div></div>}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {todayEntries.map((e) => (
+              <DipperRow key={e.id} entry={e} data={data} staffName={staffName} flash={flash}
+                localLabel={localLabels[e.id]} onSetLabel={updateLabel} />
             ))}
           </div>
-        </Card>
+        </div>
       )}
-
-      <Card title="מחשבון עודף" icon={Wallet}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 14, marginBottom: 12 }}>
-          <Field label="סכום לתשלום (₪)"><input value={amountDue} onChange={(e) => setAmountDue(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-          <Field label="שטר/סכום שהתקבל (₪)"><input value={billGiven} onChange={(e) => setBillGiven(e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-        </div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: change < 0 ? COLORS.red : COLORS.teal }}>
-          עודף להחזרה: {fmtILS(Math.max(0, change))}
-        </div>
-      </Card>
-
-      <Card title="הפקדת קופה" icon={Wallet}>
-        <p style={{ fontSize: 13.5, color: "#3a5250", marginTop: 0 }}>סגירת יום קופה — מסכם ורושם ביומן השינויים את סך המזומן שנאסף היום.</p>
-        <button style={btnGold} onClick={depositCash}><FileSpreadsheet size={16} /> רישום הפקדת קופה ({fmtILS(todayCash)})</button>
-      </Card>
     </>
   );
 }
-const roundBtn = { width: 52, height: 52, borderRadius: "50%", border: "none", background: "#fff", boxShadow: "0 1px 4px #00000022", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" };
 
-function PendingRow({ entry, label, onComplete }) {
-  const [open, setOpen] = useState(false);
-  const [method, setMethod] = useState("cash");
-  const [amount, setAmount] = useState("");
+function DipperRow({ entry, data, staffName, flash, localLabel, onSetLabel }) {
+  const [editing, setEditing] = useState(false);
+  const [pay, setPay] = useState(
+    entry.status === "exempt" ? "exempt"
+    : entry.status === "pending" ? "pending"
+    : entry.cash > 0 ? "paid-cash"
+    : entry.credit > 0 ? "paid-credit"
+    : entry.prepaid > 0 ? "paid-prepaid"
+    : "paid-cash"
+  );
+  const [payAmount, setPayAmount] = useState(String(entry.cash || entry.credit || entry.prepaid || "25"));
+  const [dur, setDur] = useState(entry.duration || "dip");
+  const [labelInput, setLabelInput] = useState(localLabel || entry.tempLabel || "");
+  const [entryTime, setEntryTime] = useState(entry.time || "");
+
+  const durLabel = DURATION_OPTIONS.find((d) => d.id === dur)?.label || dur;
+  const isExited = !!entry.exitedAt;
+  const statusColor = entry.status === "pending" ? COLORS.gold
+    : entry.status === "exempt" ? "#7c3aed" : COLORS.teal;
+
+  const save = () => {
+    const amount = parseFloat(payAmount) || 0;
+    const patch = {
+      duration: dur, time: entryTime,
+      status: pay.startsWith("paid") ? "paid" : pay,
+      cash: pay === "paid-cash" ? amount : 0,
+      credit: pay === "paid-credit" ? amount : 0,
+      prepaid: pay === "paid-prepaid" ? amount : 0,
+    };
+    data.setDippersLog((prev) => prev.map((e) => e.id === entry.id ? { ...e, ...patch } : e));
+    if (labelInput.trim() !== (localLabel || "")) onSetLabel(entry.id, labelInput.trim());
+    data.addAudit(staffName, "עריכת רשומת טובלת", `${entry.time} → ${payStatusLabel({ ...entry, ...patch })}`);
+    flash("עודכן ✓");
+    setEditing(false);
+  };
+
+  const markExited = () => {
+    data.setDippersLog((prev) => prev.map((e) => e.id === entry.id ? { ...e, exitedAt: new Date().toISOString() } : e));
+    flash("סומנה כיצאה ✓");
+  };
+
+  const PAY_BTNS = [
+    { id: "paid-cash", label: "מזומן", color: COLORS.teal },
+    { id: "paid-credit", label: "אשראי", color: COLORS.teal },
+    { id: "paid-prepaid", label: "מראש", color: COLORS.teal },
+    { id: "pending", label: "תשלם בהמשך", color: COLORS.gold },
+    { id: "exempt", label: "כלה בשנה הראשונה", color: "#7c3aed" },
+  ];
+
   return (
-    <div style={{ background: COLORS.goldLight, borderRadius: 11, padding: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontSize: 13.5 }}>
-          <b>{entry.count}</b> טובלות · נכנסה בשעה <b>{entry.time}</b>{label && <> · <span style={{ color: "#7a6020" }}>{label}</span></>}
+    <div style={{ borderRadius: 12, border: `1.5px solid ${isExited ? "#ddd" : statusColor + "44"}`,
+      padding: "10px 12px", background: isExited ? "#f8f8f8" : "#fff", opacity: isExited ? 0.75 : 1 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontWeight: 800, fontSize: 15, color: COLORS.ink }}>{entry.time || "—"}</span>
+          <span style={{ fontSize: 13, color: "#7a8f8d" }}>{durLabel}</span>
+          {(localLabel || entry.tempLabel) && <span style={{ fontSize: 12, color: COLORS.gold }}>· {localLabel || entry.tempLabel}</span>}
+          {isExited && <span style={{ fontSize: 11, color: "#aaa" }}>יצאה</span>}
         </div>
-        <button onClick={() => setOpen((o) => !o)} style={{ ...btnGhost, padding: "6px 12px", fontSize: 12.5 }}>{open ? "סגירה" : "השלמת תשלום"}</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: statusColor }}>{payStatusLabel(entry)}</span>
+          {!isExited
+            ? <button onClick={markExited} style={{ background: COLORS.aquaLight, border: "none", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: COLORS.teal, cursor: "pointer" }}>✓ יצאה</button>
+            : <button onClick={() => data.setDippersLog((prev) => prev.map((e) => e.id === entry.id ? { ...e, exitedAt: null } : e))} style={{ background: "#f0f0f0", border: "none", borderRadius: 8, padding: "4px 8px", fontSize: 11, color: "#aaa", cursor: "pointer" }}>בטל</button>
+          }
+          <button onClick={() => setEditing((x) => !x)} style={{ background: "#f4f8fa", border: "none", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: COLORS.ink }}>
+            {editing ? "סגור" : "עריכה"}
+          </button>
+        </div>
       </div>
-      {open && (
-        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <select value={method} onChange={(e) => setMethod(e.target.value)} style={{ ...inputStyle, width: "auto" }}>
-            <option value="cash">מזומן</option>
-            <option value="credit">אשראי</option>
-            <option value="prepaid">שולם מראש</option>
-          </select>
-          <input value={amount} onChange={(e) => setAmount(e.target.value)} style={{ ...inputStyle, width: 110 }} inputMode="decimal" placeholder="סכום ₪" />
-          <button style={btnPrimary} onClick={() => { onComplete(entry.id, method, amount); setOpen(false); setAmount(""); }}><Check size={15} /> אישור</button>
+      {editing && (
+        <div style={{ marginTop: 12, borderTop: "1px solid #f0f0f0", paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", align: "center", gap: 8 }}>
+            <span style={{ fontSize: 13, color: "#7a8f8d" }}>שעת כניסה</span>
+            <input type="time" style={{ border: "2px solid #e0e8ec", borderRadius: 8, padding: "4px 8px", fontSize: 13 }} value={entryTime} onChange={(e) => setEntryTime(e.target.value)} />
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {DURATION_OPTIONS.filter((d) => d.id !== "custom").map((d) => (
+              <button key={d.id} onClick={() => setDur(d.id)} style={{ padding: "8px 12px", borderRadius: 10, border: `2px solid ${dur === d.id ? COLORS.teal : "#e0e8ec"}`, background: dur === d.id ? COLORS.teal : "#fff", color: dur === d.id ? "#fff" : COLORS.ink, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{d.label}</button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {PAY_BTNS.map((p) => (
+              <button key={p.id} onClick={() => setPay(p.id)} style={{ padding: "8px 12px", borderRadius: 10, border: `2px solid ${pay === p.id ? p.color : "#e0e8ec"}`, background: pay === p.id ? p.color : "#fff", color: pay === p.id ? "#fff" : COLORS.ink, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{p.label}</button>
+            ))}
+          </div>
+          {pay && pay.startsWith("paid") && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, color: "#7a8f8d" }}>סכום ₪</span>
+              <input type="number" style={{ width: 90, border: "2px solid #e0e8ec", borderRadius: 8, padding: "6px 10px", fontSize: 14, fontWeight: 700 }} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} inputMode="decimal" />
+            </div>
+          )}
+          <Field label="כינוי זמני (לא נשמר)">
+            <input style={inputStyle} value={labelInput} onChange={(e) => setLabelInput(e.target.value)} placeholder='לדוגמה: "שרה"' />
+          </Field>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={btnPrimary} onClick={save}><Check size={14} /> שמירה</button>
+            <button style={{ ...btnGhost, color: COLORS.red, borderColor: COLORS.red + "55" }}
+              onClick={() => { if (window.confirm("למחוק?")) { data.setDippersLog((prev) => prev.filter((e) => e.id !== entry.id)); flash("נמחק ✓"); } }}>
+              <Trash2 size={14} /></button>
+          </div>
         </div>
       )}
     </div>
@@ -1112,44 +1423,99 @@ function KioskNotes({ data, staffName, flash }) {
   );
 }
 
+const MALFUNCTION_TYPES = [
+  "תחזוקה שוטפת וניקיון",
+  "תיקון תקלות",
+  "אחר",
+];
+
 function KioskMalfunctions({ data, staffName, flash }) {
   const [desc, setDesc] = useState("");
-  const [category, setCategory] = useState("תחזוקה כללית");
+  const [category, setCategory] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [editDesc, setEditDesc] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+
   const submit = () => {
-    if (!desc.trim()) return;
+    if (!desc.trim() || !category) { flash("נא לבחור סוג ולתאר את הקריאה"); return; }
     data.setMalfunctions((prev) => [{ id: uid(), date: todayStr(), staffName, category, description: desc.trim(), status: "פתוח", ts: new Date().toISOString() }, ...prev]);
     data.addAudit(staffName, "פתיחת קריאת תקלה", `${category}: ${desc.trim().slice(0, 60)}`);
-    setDesc("");
-    flash("הקריאה נשלחה לאגף התפעול ✓");
+    setDesc(""); setCategory("");
+    flash("הקריאה נשלחה ✓");
   };
-  const mine = data.malfunctions.slice(0, 8);
+
+  const startEdit = (m) => { setEditId(m.id); setEditDesc(m.description); setEditCategory(m.category); };
+  const saveEdit = () => {
+    data.setMalfunctions((prev) => prev.map((m) => m.id === editId ? { ...m, description: editDesc.trim(), category: editCategory } : m));
+    data.addAudit(staffName, "עריכת קריאת תקלה", editDesc.trim().slice(0, 60));
+    setEditId(null);
+    flash("עודכן ✓");
+  };
+  const deleteEntry = (id) => {
+    data.setMalfunctions((prev) => prev.filter((m) => m.id !== id));
+    data.addAudit(staffName, "מחיקת קריאת תקלה", "");
+    flash("נמחק ✓");
+  };
+
   const statusColor = { "פתוח": COLORS.red, "בטיפול": COLORS.gold, "טופל": COLORS.aqua };
 
   return (
     <Card title="דיווח תקלות וקריאות שירות" icon={Wrench}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-        <Field label="קטגוריה">
-          <select value={category} onChange={(e) => setCategory(e.target.value)} style={inputStyle}>
-            {["תחזוקה כללית", "אינסטלציה", "חשמל", "ניקיון", "מלאי", "אחר"].map((c) => <option key={c}>{c}</option>)}
-          </select>
+      <div style={{ marginBottom: 12 }}>
+        <Field label="סוג קריאה">
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+            {MALFUNCTION_TYPES.map((c) => (
+              <button key={c} onClick={() => setCategory(c)} style={{
+                ...btnBase(category === c ? COLORS.teal : "#fff", category === c ? "#fff" : COLORS.ink),
+                fontSize: 13.5, padding: "9px 14px", border: `1.5px solid ${category === c ? COLORS.teal : "#00000018"}`,
+              }}>{c}</button>
+            ))}
+          </div>
         </Field>
-        <Field label="תיאור התקלה">
-          <input value={desc} onChange={(e) => setDesc(e.target.value)} style={inputStyle} placeholder="תארי את התקלה בקצרה" />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <Field label="תיאור">
+          <input value={desc} onChange={(e) => setDesc(e.target.value)} style={inputStyle} placeholder="תארי את הבעיה בקצרה" />
         </Field>
       </div>
       <button style={btnPrimary} onClick={submit}><Wrench size={16} /> פתיחת קריאה</button>
 
       <div style={{ marginTop: 20, borderTop: "1px solid #00000012", paddingTop: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.teal, marginBottom: 10 }}>קריאות אחרונות מהמקווה</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {mine.length === 0 && <Empty text="אין קריאות פתוחות." />}
-          {mine.map((m) => (
-            <div key={m.id} style={{ display: "flex", justifyContent: "space-between", padding: 11, borderRadius: 10, background: "#fff", border: "1px solid #00000010" }}>
-              <div>
-                <div style={{ fontSize: 13.5, fontWeight: 600 }}>{m.category} — {m.description}</div>
-                <div style={{ fontSize: 11.5, color: "#3a5250" }}>{m.staffName} · {fmtDate(m.date)}</div>
-              </div>
-              <span style={{ fontSize: 12, fontWeight: 700, color: statusColor[m.status], alignSelf: "center" }}>{m.status}</span>
+        <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.teal, marginBottom: 10 }}>קריאות מהמקווה</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {data.malfunctions.length === 0 && <Empty text="אין קריאות." />}
+          {data.malfunctions.map((m) => (
+            <div key={m.id} style={{ borderRadius: 11, border: "1px solid #00000012", background: "#fff", overflow: "hidden" }}>
+              {editId === m.id ? (
+                <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <Field label="סוג">
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {MALFUNCTION_TYPES.map((c) => (
+                        <button key={c} onClick={() => setEditCategory(c)} style={{ ...btnBase(editCategory === c ? COLORS.teal : "#fff", editCategory === c ? "#fff" : COLORS.ink), fontSize: 12.5, padding: "7px 11px", border: `1px solid ${editCategory === c ? COLORS.teal : "#00000018"}` }}>{c}</button>
+                      ))}
+                    </div>
+                  </Field>
+                  <Field label="תיאור"><input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} style={inputStyle} /></Field>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button style={btnPrimary} onClick={saveEdit}><Check size={14} /> שמירה</button>
+                    <button style={btnGhost} onClick={() => setEditId(null)}>ביטול</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: 11, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{m.category} — {m.description}</div>
+                    <div style={{ fontSize: 11.5, color: "#3a5250" }}>{m.staffName} · {fmtDate(m.date)}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: statusColor[m.status] }}>{m.status}</span>
+                    <button onClick={() => startEdit(m)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5 }}>עריכה</button>
+                    <button onClick={() => { if (window.confirm("למחוק את הקריאה?")) deleteEntry(m.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}>
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -1266,20 +1632,20 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
   }, [mikvehs, mikvehId]);
 
   const mikveh = mikvehs.find((m) => m.id === mikvehId);
-  const data = useSystemData(mikvehId);
+  const data = useSystemData(mikvehId); // still needed for AdminStaff guest list
 
   const tabs = [
     { id: "mikvehs", label: "מקוואות", icon: Building2 },
     { id: "dashboard", label: "דשבורד", icon: TrendingUp },
     { id: "staff", label: "ניהול בלניות", icon: Users },
-    { id: "attendance", label: "נוכחות וסידור", icon: CalendarCheck },
     { id: "water", label: "איכות מים", icon: Thermometer },
     { id: "finance", label: "דוחות כספיים", icon: FileSpreadsheet },
+    { id: "dippers-report", label: "דוח טובלות", icon: Users },
     { id: "audit", label: "יומן שינויים", icon: History },
     { id: "tickets", label: "קריאות תפעול", icon: Wrench },
     { id: "permissions", label: "הרשאות", icon: ShieldCheck },
   ];
-  const needsMikveh = !["mikvehs", "permissions"].includes(tab);
+  const needsMikveh = !["mikvehs", "permissions", "staff"].includes(tab);
 
   return (
     <div style={{ paddingTop: 18 }}>
@@ -1310,15 +1676,10 @@ function AdminShell({ authUser, mikvehsCtl, adminEmails, setAdminEmails }) {
       )}
 
       {tab === "mikvehs" && <AdminMikvehs mikvehsCtl={mikvehsCtl} />}
-      {needsMikveh && !mikveh && <Empty text="אין עדיין מקוואות במערכת — יש להוסיף מקווה בלשונית 'מקוואות'." />}
-      {tab === "dashboard" && mikveh && <AdminDashboard data={data} />}
-      {tab === "staff" && mikveh && <AdminStaff data={data} mikveh={mikveh} />}
-      {tab === "attendance" && mikveh && <AdminAttendance data={data} />}
-      {tab === "water" && mikveh && <AdminWater data={data} />}
-      {tab === "finance" && mikveh && <AdminFinance data={data} />}
-      {tab === "audit" && mikveh && <AdminAudit data={data} />}
-      {tab === "tickets" && mikveh && <AdminTickets data={data} />}
+      {tab === "staff" && <AdminStaff data={data} mikveh={mikveh} />}
       {tab === "permissions" && <AdminPermissions adminEmails={adminEmails} setAdminEmails={setAdminEmails} mikvehs={mikvehs} authUser={authUser} />}
+      {needsMikveh && !mikveh && <Empty text="אין עדיין מקוואות במערכת — יש להוסיף מקווה בלשונית 'מקוואות'." />}
+      {mikveh && <AdminMikvehContent key={mikvehId} mikvehId={mikvehId} mikveh={mikveh} tab={tab} mikvehsCtl={mikvehsCtl} />}
     </div>
   );
 }
@@ -1329,6 +1690,20 @@ function StatMini({ label, value, warn }) {
       <div style={{ fontSize: 17, fontWeight: 800, color: warn ? COLORS.red : COLORS.ink }}>{value}</div>
       <div style={{ fontSize: 10.5, color: "#7a8f8d" }}>{label}</div>
     </div>
+  );
+}
+
+function AdminMikvehContent({ mikvehId, mikveh, tab, mikvehsCtl }) {
+  const data = useSystemData(mikvehId);
+  return (
+    <>
+      {tab === "dashboard" && <AdminDashboard data={data} />}
+      {tab === "water" && <AdminWater data={data} />}
+      {tab === "finance" && <AdminFinance data={data} />}
+      {tab === "dippers-report" && <AdminDippersReport mikvehsCtl={mikvehsCtl} currentMikveh={mikveh} />}
+      {tab === "audit" && <AdminAudit data={data} />}
+      {tab === "tickets" && <AdminTickets data={data} />}
+    </>
   );
 }
 
@@ -1362,6 +1737,26 @@ function AdminMikvehs({ mikvehsCtl }) {
   );
 }
 
+function SectionToggle({ title, icon: Icon, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ borderTop: `1px solid ${COLORS.aqua}18` }}>
+      <button type="button" onClick={() => setOpen((x) => !x)} style={{
+        width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+        background: "none", border: "none", cursor: "pointer", padding: "13px 0", gap: 10,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {Icon && <Icon size={15} color={COLORS.teal} />}
+          <span style={{ fontWeight: 700, fontSize: 13.5, color: COLORS.teal }}>{title}</span>
+        </div>
+        <ChevronRight size={14} color={COLORS.teal}
+          style={{ transform: open ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform .15s", flexShrink: 0 }} />
+      </button>
+      {open && <div style={{ paddingBottom: 16 }}>{children}</div>}
+    </div>
+  );
+}
+
 function MikvehRow({ mikveh, mikvehsCtl }) {
   const [expanded, setExpanded] = useState(false);
   const data = useSystemData(mikveh.id);
@@ -1369,462 +1764,617 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
   const weekday = new Date().getDay();
   const hours = mikveh.hours || OPENING_HOURS;
   const todaysHours = (hours[weekday] || {}).hours || "לא הוגדר";
-
-  const todayChecklist = data.checklist[today];
-  const isOpenNow = !!(todayChecklist && todayChecklist.opened && !todayChecklist.closed);
-
-  const { names: tonightNames, isActual: tonightIsActual } = tonightStaff(data, weekday, today);
-
-  const todayDippers = data.dippersLog.filter((d) => d.date === today).reduce((s, d) => s + d.count, 0);
+  const isOpenNow = !!(data.checklist[today]?.opened && !data.checklist[today]?.closed);
+  const { names: tonightNames } = tonightStaff(data, weekday, today);
+  const todayDippers = data.dippersLog.filter((d) => d.date === today).length;
   const openTickets = data.malfunctions.filter((m) => m.status !== "טופל").length;
   const lowStock = Object.values(data.inventory).filter((i) => i.qty <= i.threshold).length;
-
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
 
-  const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "" });
-  useEffect(() => { setForm({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "" }); }, [mikveh.id]);
-  const saveForm = () => mikvehsCtl.updateMikveh(mikveh.id, { ...form, photoUrl: toDirectImageUrl(form.photoUrl) });
-
+  // ── All state at top level ──────────────────────────────────────────────────
+  const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, bathRooms: mikveh.bathRooms ?? 2, showerRooms: mikveh.showerRooms ?? 1, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "", feedbackUrl: mikveh.feedbackUrl || "" });
   const [newPhotoUrl, setNewPhotoUrl] = useState("");
-  const addPhoto = () => {
-    if (!newPhotoUrl.trim()) return;
-    mikvehsCtl.updateMikveh(mikveh.id, { photos: [...(mikveh.photos || []), toDirectImageUrl(newPhotoUrl.trim())] });
-    setNewPhotoUrl("");
-  };
-  const removePhoto = (idx) => {
-    mikvehsCtl.updateMikveh(mikveh.id, { photos: (mikveh.photos || []).filter((_, i) => i !== idx) });
-  };
-
   const [newAmenity, setNewAmenity] = useState("");
-  const addAmenity = () => {
-    if (!newAmenity.trim()) return;
-    mikvehsCtl.updateMikveh(mikveh.id, { amenities: [...(mikveh.amenities || []), newAmenity.trim()] });
-    setNewAmenity("");
-  };
-  const removeAmenity = (idx) => {
-    mikvehsCtl.updateMikveh(mikveh.id, { amenities: (mikveh.amenities || []).filter((_, i) => i !== idx) });
-  };
-
-  const setHourDay = (dayIdx, value) => {
-    const next = hours.map((d, i) => i === dayIdx ? { ...d, hours: value } : d);
-    mikvehsCtl.updateMikveh(mikveh.id, { hours: next });
-  };
-
-  const pairingUrl = `${window.location.origin}${window.location.pathname}#/kiosk-setup/${mikveh.id}/${mikveh.setupToken}`;
   const [copied, setCopied] = useState(false);
-  const copyPairing = async () => {
-    try { await navigator.clipboard.writeText(pairingUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }
-    catch (e) { /* clipboard blocked — link is still selectable text */ }
+
+  // Attendance state — lives here, no separate component
+  const [attendanceDraft, setAttendanceDraft] = useState(null);
+  const attendanceDraftRef = React.useRef(null);
+  const setAttDraft = (val) => {
+    const next = typeof val === "function" ? val(attendanceDraftRef.current) : val;
+    attendanceDraftRef.current = next;
+    setAttendanceDraft(next);
   };
+  const [attendanceSaving, setAttendanceSaving] = useState(false);
+  const [attendanceSaved, setAttendanceSaved] = useState(false);
+  const [defStaffId, setDefStaffId] = useState("");
+  const [defStart, setDefStart] = useState("20:00");
+  const [defEnd, setDefEnd] = useState("23:30");
+  const [selDays, setSelDays] = useState([]);
+  const [bulkStaffId, setBulkStaffId] = useState("");
+  const [bulkStart, setBulkStart] = useState("20:00");
+  const [bulkEnd, setBulkEnd] = useState("23:30");
+  const [bulkType, setBulkType] = useState("weekly");
+  const [bulkDate, setBulkDate] = useState(todayStr());
+
+  // Load attendance from Firestore when row expands
+  const attendanceKey = `default-schedule:${mikveh.id}`;
+  useEffect(() => {
+    if (!expanded || attendanceDraft !== null) return;
+    storage.get(attendanceKey)
+      .then((val) => setAttDraft(val && typeof val === "object" ? val : {}))
+      .catch(() => setAttDraft({}));
+  }, [expanded, attendanceKey]);
+
+  // Sync form when mikveh changes
+  useEffect(() => {
+    setForm({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, bathRooms: mikveh.bathRooms ?? 2, showerRooms: mikveh.showerRooms ?? 1, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "", feedbackUrl: mikveh.feedbackUrl || "" });
+    setAttDraft(null); // reset so it reloads for the new mikveh
+  }, [mikveh.id]);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  const saveAll = async () => {
+    // Save mikveh form
+    mikvehsCtl.updateMikveh(mikveh.id, { ...form, photoUrl: toDirectImageUrl(form.photoUrl) });
+    // Save attendance — use ref to get latest value regardless of closure timing
+    const latestDraft = attendanceDraftRef.current;
+    if (latestDraft !== null) {
+      setAttendanceSaving(true);
+      try {
+        console.log("[saveAll] saving attendance key:", attendanceKey, "draft:", JSON.stringify(latestDraft));
+        await storage.set(attendanceKey, latestDraft);
+        const verify = await storage.get(attendanceKey);
+        console.log("[saveAll] verify read-back:", JSON.stringify(verify));
+        data.setDefaultSchedule(() => latestDraft);
+        setAttendanceSaved(true);
+        setTimeout(() => setAttendanceSaved(false), 3000);
+      } catch (e) {
+        console.error("[saveAll] attendance save error:", e);
+      }
+      setAttendanceSaving(false);
+    }
+  };
+
+  const addPhoto = () => { if (!newPhotoUrl.trim()) return; mikvehsCtl.updateMikveh(mikveh.id, { photos: [...(mikveh.photos || []), toDirectImageUrl(newPhotoUrl.trim())] }); setNewPhotoUrl(""); };
+  const removePhoto = (idx) => mikvehsCtl.updateMikveh(mikveh.id, { photos: (mikveh.photos || []).filter((_, i) => i !== idx) });
+  const addAmenity = () => { if (!newAmenity.trim()) return; mikvehsCtl.updateMikveh(mikveh.id, { amenities: [...(mikveh.amenities || []), newAmenity.trim()] }); setNewAmenity(""); };
+  const removeAmenity = (idx) => mikvehsCtl.updateMikveh(mikveh.id, { amenities: (mikveh.amenities || []).filter((_, i) => i !== idx) });
+  const setHourDay = (dayIdx, value) => { const next = hours.map((d, i) => i === dayIdx ? { ...d, hours: value } : d); mikvehsCtl.updateMikveh(mikveh.id, { hours: next }); };
+  const pairingUrl = `${window.location.origin}${window.location.pathname}#/kiosk-setup/${mikveh.id}/${mikveh.setupToken}`;
+  const copyPairing = async () => { try { await navigator.clipboard.writeText(pairingUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (e) {} };
+
+  // Attendance patch helper
+  const patchAtt = (fn) => setAttDraft((prev) => ({ ...fn(prev || {}) }));
+  const ad = attendanceDraft || {};
+  const defaultShifts = ad.__defaultShifts || (ad.__default ? [{ staffId: ad.__default, start: "", end: "" }] : []);
+
+  const addDefaultShift = () => {
+    if (!defStaffId) return;
+    const next = [...defaultShifts, { staffId: defStaffId, start: defStart, end: defEnd }];
+    patchAtt((p) => ({ ...p, __defaultShifts: next, __default: next[0]?.staffId || null }));
+    setDefStaffId(""); setDefStart("20:00"); setDefEnd("23:30");
+  };
+  const removeDefaultShift = (idx) => { const next = defaultShifts.filter((_, i) => i !== idx); patchAtt((p) => ({ ...p, __defaultShifts: next, __default: next[0]?.staffId || null })); };
+
+  const toggleDay = (i) => setSelDays((p) => p.includes(i) ? p.filter((d) => d !== i) : [...p, i]);
+  const addBulkShift = () => {
+    if (!bulkStaffId) return;
+    if (bulkType === "weekly" && !selDays.length) return;
+    const shift = { staffId: bulkStaffId, start: bulkStart || "", end: bulkEnd || "" };
+    if (bulkType === "once") {
+      patchAtt((p) => { const ovr = { ...(p.__overrides || {}) }; const date = bulkType === "once" ? bulkDate : nthWeekdayDate(0, todayStr()); ovr[date] = [...(ovr[date] || []), shift]; return { ...p, __overrides: ovr }; });
+    } else if (selDays.length === 7) {
+      // All days = default shifts
+      const next = [...((ad.__defaultShifts) || []), shift];
+      patchAtt((p) => ({ ...p, __defaultShifts: next, __default: next[0]?.staffId || null }));
+    } else {
+      patchAtt((p) => { const next = { ...p }; selDays.forEach((d) => { next[d] = [...(Array.isArray(p[d]) ? p[d] : []), shift]; }); return next; });
+    }
+    setSelDays([]); setBulkStaffId(""); setBulkStart("20:00"); setBulkEnd("23:30");
+  };
+  const removeWeeklyShift = (day, idx) => patchAtt((p) => ({ ...p, [day]: (Array.isArray(p[day]) ? p[day] : []).filter((_, i) => i !== idx) }));
+  const removeOverride = (date, idx) => patchAtt((p) => { const ovr = { ...(p.__overrides || {}) }; const arr = (ovr[date] || []).filter((_, i) => i !== idx); if (!arr.length) delete ovr[date]; else ovr[date] = arr; return { ...p, __overrides: ovr }; });
 
   return (
-    <div style={{ background: COLORS.paper, borderRadius: 15, border: `1px solid ${COLORS.aqua}22`, overflow: "hidden" }}>
-      <button onClick={() => setExpanded((x) => !x)} style={{
-        width: "100%", textAlign: "right", background: "none", border: "none", cursor: "pointer", padding: 16,
-        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 200 }}>
-          {mikveh.photoUrl ? (
-            <img src={mikveh.photoUrl} alt="" style={{ width: 40, height: 40, borderRadius: 11, objectFit: "cover", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
-          ) : (
-            <div style={{ width: 40, height: 40, borderRadius: 11, background: isOpenNow ? COLORS.aquaLight : COLORS.seafoam, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <Building2 size={19} color={isOpenNow ? COLORS.teal : COLORS.gold} />
-            </div>
-          )}
+    <div style={{ background: COLORS.paper, borderRadius: 16, border: `1px solid ${COLORS.aqua}22`, overflow: "hidden" }}>
+      {/* Collapsed header */}
+      <div onClick={() => setExpanded((x) => !x)} style={{ padding: "14px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "space-between", userSelect: "none" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 180 }}>
+          {mikveh.photoUrl
+            ? <img src={toDirectImageUrl(mikveh.photoUrl)} alt="" style={{ width: 40, height: 40, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+            : <div style={{ width: 40, height: 40, borderRadius: 10, background: isOpenNow ? COLORS.aquaLight : COLORS.seafoam, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Building2 size={18} color={isOpenNow ? COLORS.teal : COLORS.gold} /></div>
+          }
           <div>
-            <div style={{ fontWeight: 700, fontSize: 15.5 }}>{mikveh.name}</div>
-            <div style={{ fontSize: 12, color: "#7a8f8d", display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} /> {mikveh.address || "כתובת לא הוגדרה"}</div>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>{mikveh.name}</div>
+            <div style={{ fontSize: 12, color: "#7a8f8d", display: "flex", alignItems: "center", gap: 3 }}><MapPin size={10} /> {mikveh.address || "כתובת לא הוגדרה"}</div>
           </div>
         </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 11.5, fontWeight: 700, padding: "4px 10px", borderRadius: 8, background: isOpenNow ? COLORS.aquaLight : COLORS.redLight, color: isOpenNow ? COLORS.teal : COLORS.red, whiteSpace: "nowrap" }}>
-            {isOpenNow ? "פתוח עכשיו" : "סגור עכשיו"}
-          </span>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700 }}>{todaysHours}</div>
-            <div style={{ fontSize: 10, color: "#7a8f8d" }}>שעות היום</div>
-          </div>
-          <div style={{ textAlign: "center", minWidth: 70 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700 }}>{tonightNames.length ? tonightNames.join(", ") : "לא שובצה"}</div>
-            <div style={{ fontSize: 10, color: "#7a8f8d" }}>בלנית הערב{!tonightIsActual && tonightNames.length ? " (משובצת)" : ""}</div>
-          </div>
-          <div style={{ display: "flex", gap: 14 }}>
-            <StatMini label="טובלות היום" value={todayDippers} />
-            <StatMini label="קריאות פתוחות" value={openTickets} warn={openTickets > 0} />
-            <StatMini label="מלאי נמוך" value={lowStock} warn={lowStock > 0} />
-          </div>
-          <a href={mapsUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5, textDecoration: "none" }}>
-            <Navigation size={13} /> ניווט
-          </a>
-          <ChevronRight size={17} style={{ transform: expanded ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform .15s", color: COLORS.teal }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11.5, fontWeight: 700, padding: "3px 9px", borderRadius: 7, background: isOpenNow ? COLORS.aquaLight : COLORS.redLight, color: isOpenNow ? COLORS.teal : COLORS.red }}>{isOpenNow ? "פתוח" : "סגור"}</span>
+          <div style={{ textAlign: "center" }}><div style={{ fontSize: 12, fontWeight: 700 }}>{todaysHours}</div><div style={{ fontSize: 10, color: "#7a8f8d" }}>שעות היום</div></div>
+          <div style={{ textAlign: "center", minWidth: 55 }}><div style={{ fontSize: 12, fontWeight: 700 }}>{tonightNames.length ? tonightNames[0] + (tonightNames.length > 1 ? ` +${tonightNames.length - 1}` : "") : "—"}</div><div style={{ fontSize: 10, color: "#7a8f8d" }}>בלנית</div></div>
+          <div style={{ display: "flex", gap: 10 }}><StatMini label="טובלות" value={todayDippers} /><StatMini label="קריאות" value={openTickets} warn={openTickets > 0} /><StatMini label="מלאי" value={lowStock} warn={lowStock > 0} /></div>
+          <a href={mapsUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ ...btnGhost, padding: "5px 10px", fontSize: 12, textDecoration: "none" }}><Navigation size={12} /> ניווט</a>
+          <ChevronRight size={15} color={COLORS.teal} style={{ transform: expanded ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform .15s", flexShrink: 0 }} />
         </div>
-      </button>
+      </div>
 
+      {/* Expanded content — click stops propagation so inner buttons don't close the row */}
       {expanded && (
-        <div style={{ borderTop: `1px solid ${COLORS.aqua}22`, padding: 18, display: "flex", flexDirection: "column", gap: 20 }}>
+        <div style={{ padding: "0 18px", borderTop: `1px solid ${COLORS.aqua}18` }} onClick={(e) => e.stopPropagation()}>
 
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 8 }}>פרטי המקווה</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10, marginBottom: 10 }}>
+          <SectionToggle title="פרטי המקווה" icon={Building2} defaultOpen>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10, marginBottom: 10 }}>
               <Field label="שם"><input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
               <Field label="כתובת"><input style={inputStyle} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></Field>
               <Field label="טלפון"><input style={inputStyle} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
-              <Field label="עלות טבילה (₪)"><input style={inputStyle} value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="25" inputMode="decimal" /></Field>
+              <Field label="מחיר (₪)"><input style={inputStyle} value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} inputMode="decimal" /></Field>
+              <Field label="קישור תשלום"><input style={inputStyle} value={form.paymentUrl} onChange={(e) => setForm({ ...form, paymentUrl: e.target.value })} placeholder="https://..." /></Field>
+              <Field label="קישור משוב"><input style={inputStyle} value={form.feedbackUrl} onChange={(e) => setForm({ ...form, feedbackUrl: e.target.value })} placeholder="https://..." /></Field>
             </div>
-            <Field label="קישור לתשלום מקוון (ייפתח כשהתושבת תלחץ 'לתשלום')">
-              <input style={inputStyle} value={form.paymentUrl} onChange={(e) => setForm({ ...form, paymentUrl: e.target.value })} placeholder="https://..." />
-            </Field>
-            <Field label="הערות נוספות (יוצגו לתושבות בממשק הציבורי, בתוך 'עוד פרטים')">
+            <Field label="הודעה קבועה לדף הבית"><input style={inputStyle} value={form.pinnedNote} onChange={(e) => setForm({ ...form, pinnedNote: e.target.value })} placeholder='לדוגמה: "בשיפוצים"' /></Field>
+            <div style={{ marginTop: 10 }}><ToggleRow label="נגישות לנכים (מעלון)" checked={!!mikveh.accessible} onChange={(v) => mikvehsCtl.updateMikveh(mikveh.id, { accessible: v })} /></div>
+          </SectionToggle>
+
+          <SectionToggle title="הערות ומידע לציבור" icon={StickyNote}>
+            <Field label="הערות (בתוך \'עוד פרטים\')">
               <textarea style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </Field>
             <div style={{ marginTop: 10 }}>
-              <Field label="הודעה קבועה לדף הבית (מוצגת תמיד, בבירור, בשורת המקווה)">
-                <input style={inputStyle} value={form.pinnedNote} onChange={(e) => setForm({ ...form, pinnedNote: e.target.value })} placeholder='לדוגמה: "בשיפוצים — ייתכנו שינויים בשעות"' />
-              </Field>
-            </div>
-            <div style={{ marginTop: 10, maxWidth: 220 }}>
-              <Field label="מספר חדרי אמבטיה/הכנה במקווה (לחישוב עומס)">
-                <input type="number" min="1" style={inputStyle} value={form.roomsCount} onChange={(e) => setForm({ ...form, roomsCount: Math.max(1, parseInt(e.target.value, 10) || 1) })} />
-              </Field>
-            </div>
-            <div style={{ marginTop: 10 }}>
-              <Field label="תמונה ראשית — הדבקי קישור מ-Google Drive, Dropbox, או כל URL ישיר">
-                <input style={inputStyle} value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} placeholder="https://drive.google.com/file/d/..." />
-              </Field>
-              {form.photoUrl && (
-                <img src={toDirectImageUrl(form.photoUrl)} alt="" style={{ marginTop: 8, width: "100%", maxWidth: 260, height: 130, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012" }}
-                  onError={(e) => { e.currentTarget.style.display = "none"; }} />
-              )}
-            </div>
-            <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
-              <button style={btnPrimary} onClick={saveForm}><Check size={15} /> שמירת פרטים</button>
-              <div style={{ flex: 1, minWidth: 220 }}>
-                <ToggleRow label="נגישות לנכים (מעלון)" checked={!!mikveh.accessible} onChange={(v) => mikvehsCtl.updateMikveh(mikveh.id, { accessible: v })} />
+              <div style={{ fontSize: 12, color: "#7a8f8d", marginBottom: 5 }}>נגישות ושירותים (מוצג לציבור)</div>
+              {(mikveh.amenities || []).map((a, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.seafoam, borderRadius: 7, padding: "5px 10px", marginBottom: 4 }}>
+                  <span style={{ fontSize: 13 }}>{a}</span>
+                  <button type="button" onClick={() => removeAmenity(i)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={13} /></button>
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                <input style={{ ...inputStyle, flex: 1 }} value={newAmenity} onChange={(e) => setNewAmenity(e.target.value)} placeholder="הוספת שורה…" onKeyDown={(e) => e.key === "Enter" && addAmenity()} />
+                <button type="button" style={btnGhost} onClick={addAmenity}><Plus size={14} /></button>
               </div>
             </div>
-          </div>
+          </SectionToggle>
 
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 2 }}>נגישות ופרטים נוספים (מוצג לתושבות בעמוד הציבורי)</div>
-            <p style={{ fontSize: 11.5, color: "#7a8f8d", marginTop: 0, marginBottom: 8 }}>את/ה קובעת בדיוק אילו שורות יופיעו שם — למשל "חניה נגישה", "ערכות בלנית למכירה" וכו'.</p>
-            {(mikveh.amenities || []).length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
-                {mikveh.amenities.map((a, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.seafoam, borderRadius: 9, padding: "7px 11px" }}>
-                    <span style={{ fontSize: 13 }}>{a}</span>
-                    <button onClick={() => removeAmenity(i)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={14} /></button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 8 }}>
-              <input style={{ ...inputStyle, flex: 1 }} value={newAmenity} onChange={(e) => setNewAmenity(e.target.value)} placeholder="לדוגמה: חניה נגישה בסמוך לכניסה" onKeyDown={(e) => e.key === "Enter" && addAmenity()} />
-              <button style={{ ...btnGhost, flexShrink: 0 }} onClick={addAmenity}><Plus size={15} /> הוספה</button>
-            </div>
-          </div>
-
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}><ImagePlus size={14} /> תמונות נוספות</div>
-            <p style={{ fontSize: 11.5, color: "#7a8f8d", marginTop: 0, marginBottom: 8 }}>הדביקי קישור לתמונה מתויקת בענן (Google Drive ציבורי, Imgur וכו') — אין עדיין העלאת קבצים ישירה.</p>
-            {(mikveh.photos || []).length > 0 && (
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-                {mikveh.photos.map((url, i) => (
-                  <div key={i} style={{ position: "relative" }}>
-                    <img src={url} alt="" style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012" }}
-                      onError={(e) => { e.currentTarget.style.opacity = 0.25; }} />
-                    <button onClick={() => removePhoto(i)} style={{
-                      position: "absolute", top: -6, left: -6, width: 22, height: 22, borderRadius: "50%", background: COLORS.red, color: "#fff",
-                      border: "2px solid #fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                    }}><X size={12} /></button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 8 }}>
-              <input style={{ ...inputStyle, flex: 1 }} value={newPhotoUrl} onChange={(e) => setNewPhotoUrl(e.target.value)} placeholder="https://..." onKeyDown={(e) => e.key === "Enter" && addPhoto()} />
-              <button style={{ ...btnGhost, flexShrink: 0 }} onClick={addPhoto}><Plus size={15} /> הוספה</button>
-            </div>
-          </div>
-
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 8 }}>שעות פתיחה שבועיות</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <SectionToggle title="שעות פתיחה שבועיות" icon={Clock}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
               {hours.map((d, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ width: 56, fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{d.day}</span>
+                  <span style={{ width: 48, fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{d.day}</span>
                   <input style={{ ...inputStyle, flex: 1 }} value={d.hours} onChange={(e) => setHourDay(i, e.target.value)} />
                 </div>
               ))}
             </div>
-          </div>
+          </SectionToggle>
 
-          <p style={{ fontSize: 11.5, color: "#7a8f8d", margin: 0 }}>ניהול צוות הבלניות ושיבוץ נוכחות עברו ללשונית "ניהול בלניות".</p>
-
-          <div style={{ background: COLORS.seafoam, borderRadius: 11, padding: 12 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}><Tablet size={13} /> קישור להתקנת טאבלט קבוע במקווה זה</div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <code style={{ flex: 1, minWidth: 160, fontSize: 11.5, background: "#fff", padding: "6px 9px", borderRadius: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pairingUrl}</code>
-              <button onClick={copyPairing} style={{ ...btnGhost, padding: "6px 10px", fontSize: 11.5 }}><Copy size={12} /> {copied ? "הועתק!" : "העתקה"}</button>
-              <button onClick={() => mikvehsCtl.regenerateToken(mikveh.id)} style={{ ...btnGhost, padding: "6px 10px", fontSize: 11.5 }}><RefreshCw size={12} /> קישור חדש</button>
+          <SectionToggle title="תמונות" icon={Image}>
+            <Field label="תמונה ראשית (Drive / Imgur / URL)">
+              <input style={inputStyle} value={form.photoUrl} onChange={(e) => setForm({ ...form, photoUrl: e.target.value })} placeholder="https://..." />
+            </Field>
+            {form.photoUrl && <img src={toDirectImageUrl(form.photoUrl)} alt="" style={{ marginTop: 8, width: "100%", maxWidth: 200, height: 100, objectFit: "cover", borderRadius: 10 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+            {(mikveh.photos || []).length > 0 && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }}>
+                {mikveh.photos.map((url, i) => (
+                  <div key={i} style={{ position: "relative" }}>
+                    <img src={url} alt="" style={{ width: 110, height: 85, objectFit: "cover", borderRadius: 9 }} onError={(e) => { e.currentTarget.style.opacity = 0.3; }} />
+                    <button type="button" onClick={() => removePhoto(i)} style={{ position: "absolute", top: -6, left: -6, width: 20, height: 20, borderRadius: "50%", background: COLORS.red, color: "#fff", border: "2px solid #fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={11} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <input style={{ ...inputStyle, flex: 1 }} value={newPhotoUrl} onChange={(e) => setNewPhotoUrl(e.target.value)} placeholder="קישור לתמונה נוספת…" onKeyDown={(e) => e.key === "Enter" && addPhoto()} />
+              <button type="button" style={btnGhost} onClick={addPhoto}><Plus size={14} /></button>
             </div>
-            <div style={{ marginTop: 6, fontSize: 11.5, color: "#7a8f8d" }}>לפתוח את הקישור בדפדפן הטאבלט הפיזי שיישאר קבוע במקווה — פעולה חד-פעמית.</div>
-          </div>
+          </SectionToggle>
 
-          <button onClick={() => { if (window.confirm(`למחוק את "${mikveh.name}"? כל הנתונים שלו יישארו מאוחסנים אך לא יוצגו יותר.`)) mikvehsCtl.removeMikveh(mikveh.id); }}
-            style={{ ...btnGhost, color: COLORS.red, borderColor: COLORS.red + "55", alignSelf: "flex-start" }}>
-            <Trash2 size={14} /> מחיקת המקווה
-          </button>
+          <SectionToggle title="הגדרות טכניות" icon={Settings}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 10, marginBottom: 12 }}>
+              <Field label="חדרי אמבטיה (גם התארגנות)"><input type="number" min="0" style={inputStyle} value={form.bathRooms} onChange={(e) => setForm({ ...form, bathRooms: Math.max(0, parseInt(e.target.value) || 0) })} /></Field>
+              <Field label="חדרי מקלחת (טבילה בלבד)"><input type="number" min="0" style={inputStyle} value={form.showerRooms} onChange={(e) => setForm({ ...form, showerRooms: Math.max(0, parseInt(e.target.value) || 0) })} /></Field>
+            </div>
+            <div style={{ background: COLORS.seafoam, borderRadius: 10, padding: 10, marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 5, display: "flex", alignItems: "center", gap: 5 }}><Tablet size={12} /> קישור טאבלט</div>
+              <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
+                <code style={{ flex: 1, minWidth: 120, fontSize: 10.5, background: "#fff", padding: "4px 7px", borderRadius: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pairingUrl}</code>
+                <button type="button" onClick={copyPairing} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11 }}><Copy size={10} /> {copied ? "✓" : "העתקה"}</button>
+                <button type="button" onClick={() => mikvehsCtl.regenerateToken(mikveh.id)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11 }}><RefreshCw size={10} /> חדש</button>
+              </div>
+            </div>
+            <button type="button" onClick={() => { if (window.confirm(`למחוק את "${mikveh.name}"?`)) mikvehsCtl.removeMikveh(mikveh.id); }}
+              style={{ ...btnGhost, color: COLORS.red, borderColor: COLORS.red + "55" }}>
+              <Trash2 size={13} /> מחיקת המקווה
+            </button>
+          </SectionToggle>
+
+          <SectionToggle title="שיבוץ נוכחות בלניות" icon={CalendarCheck}>
+            {attendanceDraft === null
+              ? <CenteredLoading text="טוענת שיבוצים…" />
+              : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                <p style={{ fontSize: 12.5, color: "#7a8f8d", margin: "0 0 14px" }}>
+                  שיבוץ קבוע חוזר כל שבוע. שיבוץ חד-פעמי גובר עליו לתאריך ספציפי.
+                  בלנית ללא שעות = אחראית כל שעות הפעילות.
+                </p>
+
+                {/* ── Add shift form ── */}
+                <div style={{ background: COLORS.seafoam, borderRadius: 12, padding: 14, marginBottom: 16 }}>
+                  {/* Staff */}
+                  <div style={{ marginBottom: 10 }}>
+                    <select style={{ ...inputStyle, width: "100%" }} value={bulkStaffId} onChange={(e) => setBulkStaffId(e.target.value)}>
+                      <option value="">בחרי בלנית…</option>
+                      {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  {/* Hours — optional */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12.5, color: "#7a8f8d", flexShrink: 0 }}>שעות (אופציונלי):</span>
+                    <input type="time" style={{ ...inputStyle, width: "auto" }} value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} />
+                    <span>–</span>
+                    <input type="time" style={{ ...inputStyle, width: "auto" }} value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} />
+                    <button type="button" onClick={() => { setBulkStart(""); setBulkEnd(""); }} style={{ fontSize: 11, color: "#aaa", background: "none", border: "none", cursor: "pointer" }}>נקה שעות</button>
+                  </div>
+                  {/* Permanent or one-time */}
+                  <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                    {[["weekly", "קבוע (כל שבוע)"], ["once", "חד-פעמי (תאריך)"]].map(([id, lbl]) => (
+                      <button type="button" key={id} onClick={() => setBulkType(id)} style={{
+                        ...btnBase(bulkType === id ? COLORS.teal : "#fff", bulkType === id ? "#fff" : COLORS.ink),
+                        flex: 1, justifyContent: "center", fontSize: 13, padding: "8px 0",
+                        border: `1.5px solid ${bulkType === id ? COLORS.teal : "#00000018"}`,
+                      }}>{lbl}</button>
+                    ))}
+                  </div>
+                  {/* Days (for weekly) or date (for once) */}
+                  {bulkType === "weekly" ? (
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
+                      <button type="button" onClick={() => setSelDays([0,1,2,3,4,5,6])} style={{ ...btnGhost, padding: "4px 9px", fontSize: 12 }}>כולם</button>
+                      <button type="button" onClick={() => setSelDays([0,1,2,3,4])} style={{ ...btnGhost, padding: "4px 9px", fontSize: 12 }}>א'–ה'</button>
+                      {WEEKDAYS_HE.map((day, i) => (
+                        <button type="button" key={i} onClick={() => toggleDay(i)} style={{
+                          ...btnBase(selDays.includes(i) ? COLORS.teal : "#fff", selDays.includes(i) ? "#fff" : COLORS.ink),
+                          fontSize: 12, padding: "5px 10px", border: `1px solid ${selDays.includes(i) ? COLORS.teal : "#00000018"}`,
+                        }}>{day}</button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ marginBottom: 10 }}>
+                      <input type="date" style={{ ...inputStyle, width: "auto" }} value={bulkDate} onChange={(e) => setBulkDate(e.target.value)} />
+                    </div>
+                  )}
+                  <button type="button"
+                    style={{ ...btnPrimary, opacity: (bulkStaffId && (bulkType === "once" || selDays.length)) ? 1 : 0.4 }}
+                    onClick={addBulkShift}
+                    disabled={!bulkStaffId || (bulkType === "weekly" && !selDays.length)}>
+                    <Plus size={13} /> הוספת שיבוץ
+                  </button>
+                </div>
+
+                {/* ── Current schedule summary ── */}
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 10 }}>שיבוץ קבוע</div>
+                {WEEKDAYS_HE.map((day, i) => {
+                  const weeklyShifts = Array.isArray(ad[i]) ? ad[i] : [];
+                  const defShifts = ad.__defaultShifts || (ad.__default ? [{ staffId: ad.__default, start: "", end: "" }] : []);
+                  const shown = weeklyShifts.length ? weeklyShifts : defShifts;
+                  const isDefault = weeklyShifts.length === 0 && defShifts.length > 0;
+                  return (
+                    <div key={i} style={{ borderTop: "1px solid #f0f0f0", padding: "8px 0" }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: COLORS.ink, marginBottom: 4 }}>{day}</div>
+                      {shown.length === 0
+                        ? <div style={{ fontSize: 11.5, color: "#ccc" }}>ללא שיבוץ</div>
+                        : shown.map((s, idx) => {
+                          const st = data.staff.find((x) => x.id === s.staffId);
+                          return (
+                            <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: isDefault ? COLORS.seafoam : COLORS.aquaLight, borderRadius: 8, padding: "5px 10px", marginBottom: 3 }}>
+                              <span style={{ fontSize: 12.5 }}>
+                                {isDefault && <span style={{ fontSize: 10.5, color: "#aaa", marginLeft: 5 }}>ברירת מחדל · </span>}
+                                <b>{st?.name || "?"}</b>
+                                {s.start && <span style={{ color: "#7a8f8d", fontWeight: 400 }}> · {s.start}–{s.end}</span>}
+                              </span>
+                              {!isDefault && <button type="button" onClick={() => removeWeeklyShift(i, idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={12} /></button>}
+                            </div>
+                          );
+                        })
+                      }
+                    </div>
+                  );
+                })}
+
+                {/* ── One-time overrides ── */}
+                {Object.keys(ad.__overrides || {}).length > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.gold, marginBottom: 8 }}>שיבוצים חד-פעמיים</div>
+                    {Object.entries(ad.__overrides || {}).sort().map(([date, shifts]) => (
+                      <div key={date} style={{ background: COLORS.goldLight, borderRadius: 8, padding: "8px 11px", marginBottom: 5 }}>
+                        <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 3 }}>{fmtDate(date)}</div>
+                        {(Array.isArray(shifts) ? shifts : [shifts]).map((s, idx) => {
+                          const st = data.staff.find((x) => x.id === s.staffId);
+                          return (
+                            <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <span style={{ fontSize: 12.5 }}><b>{st?.name || "?"}</b>{s.start ? ` · ${s.start}–${s.end}` : ""}</span>
+                              <button type="button" onClick={() => removeOverride(date, idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={12} /></button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </SectionToggle>
+
+          {/* Save button — outside all sections */}
+          <div style={{ padding: "16px 0", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <button type="button" style={{ ...btnPrimary, fontSize: 15, padding: "12px 28px" }} onClick={saveAll} disabled={attendanceSaving}>
+              {attendanceSaving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Check size={16} />}
+              שמירת כל השינויים
+            </button>
+            {attendanceSaved && <span style={{ fontSize: 13, color: COLORS.teal, fontWeight: 700 }}>✓ נשמר</span>}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function AdminPermissions({ adminEmails, setAdminEmails, mikvehs, authUser }) {
-  const [newAdminEmail, setNewAdminEmail] = useState("");
-  const [newAdminName, setNewAdminName] = useState("");
-  const addAdmin = () => {
-    if (!newAdminEmail.trim()) return;
-    setAdminEmails((prev) => [...prev, { email: newAdminEmail.trim().toLowerCase(), name: newAdminName.trim() || newAdminEmail.trim(), addedAt: new Date().toISOString() }]);
-    setNewAdminEmail(""); setNewAdminName("");
-  };
-  const removeAdmin = (email) => {
-    if (adminEmails.length <= 1) { window.alert("לא ניתן להסיר את המנהל/ת האחרון/ה — כך לא תישארי חסומה מחוץ למערכת."); return; }
-    setAdminEmails((prev) => prev.filter((a) => a.email !== email));
-  };
-
-  return (
-    <Card title="מנהלי מערכת — כניסה ל'ניהול ובקרה'" icon={ShieldCheck}>
-      <p style={{ fontSize: 13, color: "#3a5250", marginTop: 0 }}>רק כתובות Google ברשימה הזו יוכלו להתחבר לממשק הניהול. (הרשאות כניסה לבלניות עברו ללשונית "ניהול בלניות" של כל מקווה.)</p>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 16 }}>
-        <input placeholder="שם" style={inputStyle} value={newAdminName} onChange={(e) => setNewAdminName(e.target.value)} />
-        <input placeholder="[email protected]" style={inputStyle} value={newAdminEmail} onChange={(e) => setNewAdminEmail(e.target.value)} />
-        <button style={btnPrimary} onClick={addAdmin}><Plus size={15} /> הוספה</button>
-      </div>
-      <Table headers={["שם", "אימייל", ""]}
-        rows={adminEmails.map((a) => [a.name, a.email, a.email === authUser.email.toLowerCase() ? <span key="me" style={{ fontSize: 11.5, color: "#7a8f8d" }}>את/ה</span> : <button key="x" onClick={() => removeAdmin(a.email)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5, color: COLORS.red }}><Trash2 size={12} /></button>])}
-        empty="אין מנהלים מוגדרים." />
-    </Card>
-  );
-}
-
-function StatCard({ label, value, icon: Icon, color = COLORS.teal }) {
-  return (
-    <div style={{ background: COLORS.paper, borderRadius: 14, padding: 18, border: `1px solid ${color}22`, flex: 1, minWidth: 150 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, color, marginBottom: 8 }}>
-        <Icon size={16} /><span style={{ fontSize: 12.5, fontWeight: 700 }}>{label}</span>
-      </div>
-      <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "'Heebo'" }}>{value}</div>
-    </div>
-  );
-}
-
-function AdminDashboard({ data }) {
-  const today = todayStr();
-  const todayChecklist = data.checklist[today];
-  const todayEntries = data.dippersLog.filter((e) => e.date === today);
-  const todayDippers = todayEntries.reduce((s, e) => s + e.count, 0);
-  const openTickets = data.malfunctions.filter((m) => m.status !== "טופל").length;
-  const lowStock = Object.values(data.inventory).filter((i) => i.qty <= i.threshold).length;
-
-  // predictive-style analytics: average dippers by weekday, computed from real logged history
-  const byWeekday = useMemo(() => {
-    const buckets = WEEKDAYS_HE.map((d) => ({ day: d, total: 0, count: 0 }));
-    data.dippersLog.forEach((e) => {
-      const idx = new Date(e.date).getDay();
-      buckets[idx].total += e.count;
-      buckets[idx].count += 1;
-    });
-    return buckets.map((b) => ({ day: b.day, ממוצע: b.count ? Math.round((b.total / b.count) * 10) / 10 : 0 }));
-  }, [data.dippersLog]);
-
-  const busiest = [...byWeekday].sort((a, b) => b.ממוצע - a.ממוצע)[0];
-
-  return (
-    <>
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 18 }}>
-        <StatCard label="טובלות היום" value={todayDippers} icon={Users} />
-        <StatCard label="סטטוס צ׳ק-ליסט" value={todayChecklist?.closed ? "נסגר" : todayChecklist?.opened ? "פתוח" : "טרם נפתח"} icon={ClipboardList} color={todayChecklist?.opened ? COLORS.aqua : COLORS.red} />
-        <StatCard label="קריאות פתוחות" value={openTickets} icon={Wrench} color={openTickets ? COLORS.red : COLORS.aqua} />
-        <StatCard label="פריטים במלאי נמוך" value={lowStock} icon={Package} color={lowStock ? COLORS.gold : COLORS.aqua} />
-      </div>
-
-      <Card title="חיזוי עומסים — ממוצע טובלות לפי יום בשבוע" icon={TrendingUp}
-        right={busiest.ממוצע > 0 && <span style={{ fontSize: 12.5, color: COLORS.gold, fontWeight: 700 }}>יום עמוס: {busiest.day}</span>}>
-        {data.dippersLog.length === 0 ? (
-          <Empty text="עדיין אין נתוני היסטוריה — הגרף יתמלא ככל שיירשמו ביקורים בטאבלט." />
-        ) : (
-          <div style={{ height: 240 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={byWeekday}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#00000010" />
-                <XAxis dataKey="day" tick={{ fontSize: 12, fontFamily: "Assistant" }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Bar dataKey="ממוצע" fill={COLORS.aqua} radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-        {busiest.ממוצע > 0 && (
-          <div style={{ marginTop: 12, fontSize: 13.5, background: COLORS.goldLight, padding: 12, borderRadius: 10 }}>
-            💡 המלצה אוטומטית: ביום <b>{busiest.day}</b> נרשם העומס הגבוה ביותר בממוצע — מומלץ לשבץ 2 בלניות במשמרת.
-          </div>
-        )}
-      </Card>
-    </>
-  );
-}
-
-function AdminStaff({ data, mikveh }) {
-  const [kioskEmails, setKioskEmails] = useShared("kiosk-emails", []);
-  const guestList = kioskEmails.filter((e) => e.mikvehId === mikveh.id);
-
-  const [editing, setEditing] = useState(null); // staff id currently being edited, or "new"
-  const emptyDraft = { name: "", phone: "", email: "", pin: "" };
-  const [draft, setDraft] = useState(emptyDraft);
-
-  const startEdit = (s) => { setEditing(s.id); setDraft({ name: s.name, phone: s.phone || "", email: s.email || "", pin: s.pin || "" }); };
-  const startNew = () => { setEditing("new"); setDraft(emptyDraft); };
-  const cancelEdit = () => { setEditing(null); setDraft(emptyDraft); };
-
-  const saveEdit = () => {
-    if (!draft.name.trim() || !/^\d{4}$/.test(draft.pin)) return;
-    if (editing === "new") {
-      data.setStaff((prev) => [...prev, { id: uid(), name: draft.name.trim(), phone: draft.phone.trim(), email: draft.email.trim().toLowerCase(), pin: draft.pin }]);
-    } else {
-      data.setStaff((prev) => prev.map((s) => s.id === editing ? { ...s, name: draft.name.trim(), phone: draft.phone.trim(), email: draft.email.trim().toLowerCase(), pin: draft.pin } : s));
-    }
-    cancelEdit();
-  };
-  const removeStaff = (id) => {
-    if (window.confirm("להסיר את הבלנית מהצוות? זה גם יבטל את שיבוצה בסידור הנוכחות.")) {
-      data.setStaff((prev) => prev.filter((s) => s.id !== id));
-    }
-  };
-
-  const [guestName, setGuestName] = useState("");
-  const [guestEmail, setGuestEmail] = useState("");
-  const addGuest = () => {
-    if (!guestName.trim() || !guestEmail.trim()) return;
-    setKioskEmails((prev) => [...prev, { email: guestEmail.trim().toLowerCase(), staffName: guestName.trim(), mikvehId: mikveh.id, addedAt: new Date().toISOString() }]);
-    setGuestName(""); setGuestEmail("");
-  };
-  const removeGuest = (email) => setKioskEmails((prev) => prev.filter((e) => !(e.mikvehId === mikveh.id && e.email === email)));
-
-  return (
-    <>
-      <Card title="צוות בלניות" icon={Users} right={!editing && <button style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5 }} onClick={startNew}><Plus size={14} /> בלנית חדשה</button>}>
-        <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
-          כתובת המייל (אם הוזנה) מאשרת אוטומטית כניסה מהטלפון האישי עם אותו חשבון Google, כבלנית הזו.
-        </p>
-        {editing && (
-          <div style={{ background: COLORS.seafoam, borderRadius: 12, padding: 14, marginBottom: 14 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 10 }}>
-              <Field label="שם"><input style={inputStyle} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
-              <Field label="טלפון"><input style={inputStyle} value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></Field>
-              <Field label="אימייל (Google)"><input style={inputStyle} value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} placeholder="[email protected]" /></Field>
-              <Field label="קוד אישי (4 ספרות, לכניסה בטאבלט)"><input style={inputStyle} value={draft.pin} maxLength={4} inputMode="numeric" onChange={(e) => setDraft({ ...draft, pin: e.target.value.replace(/\D/g, "") })} /></Field>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button style={btnPrimary} onClick={saveEdit}><Check size={15} /> שמירה</button>
-              <button style={btnGhost} onClick={cancelEdit}>ביטול</button>
-            </div>
-          </div>
-        )}
-        <Table headers={["שם", "טלפון", "אימייל", "קוד", ""]}
-          rows={data.staff.map((s) => [s.name, s.phone || "—", s.email || "—", s.pin, (
-            <div key="actions" style={{ display: "flex", gap: 6 }}>
-              <button onClick={() => startEdit(s)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5 }}>עריכה</button>
-              <button onClick={() => removeStaff(s.id)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5, color: COLORS.red }}><Trash2 size={12} /></button>
-            </div>
-          )])}
-          empty="אין עדיין בלניות בצוות." />
-      </Card>
-
-      <Card title="הרשאות כניסה נוספות" icon={KeyRound}>
-        <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
-          למי שאינה חלק קבוע מהצוות (למשל מחליפה חד-פעמית) — מאשר כניסה מהטלפון האישי בלי להוסיף אותה לצוות הקבוע.
-        </p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 14 }}>
-          <input placeholder="שם" style={inputStyle} value={guestName} onChange={(e) => setGuestName(e.target.value)} />
-          <input placeholder="[email protected]" style={inputStyle} value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} />
-          <button style={btnPrimary} onClick={addGuest}><Plus size={15} /> הוספה</button>
-        </div>
-        <Table headers={["שם", "אימייל", ""]}
-          rows={guestList.map((g) => [g.staffName, g.email, <button key="x" onClick={() => removeGuest(g.email)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5, color: COLORS.red }}><Trash2 size={12} /></button>])}
-          empty="אין הרשאות נוספות." />
-      </Card>
-    </>
-  );
-}
-
-function AdminAttendance({ data }) {
+function AdminAttendance({ data, mikvehId }) {
+  const storageKey = `default-schedule:${mikvehId || "unassigned"}`;
   const recent = data.loginLog.slice(0, 15);
 
-  const [dayForm, setDayForm] = useState({}); // per-weekday draft: { staffId, start, end }
-  const updateDraft = (day, patch) => setDayForm((prev) => ({ ...prev, [day]: { ...(prev[day] || { staffId: "", start: "20:00", end: "22:00" }), ...patch } }));
+  // Load draft directly from Firestore to avoid the useShared async-load race condition
+  const [draft, setDraft] = useState(null); // null = still loading
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
 
-  const addShift = (day) => {
-    const draft = dayForm[day];
-    if (!draft || !draft.staffId) return;
-    data.setDefaultSchedule((prev) => ({ ...prev, [day]: [...scheduleShifts(prev, day), { staffId: draft.staffId, start: draft.start || "", end: draft.end || "" }] }));
-    setDayForm((prev) => ({ ...prev, [day]: { staffId: "", start: "20:00", end: "22:00" } }));
+  useEffect(() => {
+    let active = true;
+    storage.get(storageKey).then((val) => {
+      if (active) setDraft(val && typeof val === "object" ? val : {});
+    }).catch(() => { if (active) setDraft({}); });
+    return () => { active = false; };
+  }, [storageKey]);
+
+  const patchDraft = (updater) => setDraft((prev) => {
+    const next = typeof updater === "function" ? updater(prev || {}) : updater;
+    console.log("[Attendance] patchDraft prev:", JSON.stringify(prev), "→ next:", JSON.stringify(next));
+    return { ...next };
+  });
+
+  const saveAll = async () => {
+    setSaving(true); setError(""); setSaved(false);
+    console.log("[Attendance] saving to key:", storageKey, "draft:", JSON.stringify(draft));
+    try {
+      const result = await storage.set(storageKey, draft);
+      console.log("[Attendance] storage.set result:", result);
+      // Update in-memory state so UI and other components reflect saved data immediately
+      data.setDefaultSchedule(() => draft);
+      // Verify round-trip by reading back
+      const verify = await storage.get(storageKey);
+      console.log("[Attendance] verify read-back:", verify);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      console.error("[Attendance] save error:", e);
+      setError("שגיאה בשמירה: " + (e?.message || String(e)));
+    } finally {
+      setSaving(false);
+    }
   };
-  const removeShift = (day, idx) => {
-    data.setDefaultSchedule((prev) => ({ ...prev, [day]: scheduleShifts(prev, day).filter((_, i) => i !== idx) }));
+
+  // ─── All hooks must be before any early return ────────────────────────────
+  const [defStaffId, setDefStaffId] = useState("");
+  const [defStart, setDefStart] = useState("20:00");
+  const [defEnd, setDefEnd] = useState("23:30");
+  const [selectedDays, setSelectedDays] = useState([]);
+  const [bulkStaffId, setBulkStaffId] = useState("");
+  const [bulkStart, setBulkStart] = useState("20:00");
+  const [bulkEnd, setBulkEnd] = useState("23:30");
+  const [bulkType, setBulkType] = useState("weekly");
+  const [bulkDate, setBulkDate] = useState(todayStr());
+
+  if (draft === null) return <CenteredLoading text="טוענת שיבוצים…" />;
+
+  const defaultShifts = (draft.__defaultShifts) || (
+    draft.__default ? [{ staffId: draft.__default, start: "", end: "" }] : []
+  );
+  const addDefaultShift = () => {
+    if (!defStaffId) return;
+    const next = [...defaultShifts, { staffId: defStaffId, start: defStart, end: defEnd }];
+    patchDraft((prev) => ({ ...prev, __defaultShifts: next, __default: next[0]?.staffId || null }));
+    setDefStaffId(""); setDefStart("20:00"); setDefEnd("23:30");
+  };
+  const removeDefaultShift = (idx) => {
+    const next = defaultShifts.filter((_, i) => i !== idx);
+    patchDraft((prev) => ({ ...prev, __defaultShifts: next, __default: next[0]?.staffId || null }));
+  };
+
+  // ─── Bulk shift add ────────────────────────────────────────────────────────
+  const toggleDay = (i) => setSelectedDays((prev) => prev.includes(i) ? prev.filter((d) => d !== i) : [...prev, i]);
+  const selectAll = () => setSelectedDays(selectedDays.length === 7 ? [] : [0,1,2,3,4,5,6]);
+  const selectWeekdays = () => setSelectedDays([0,1,2,3,4]);
+
+  const addBulkShift = () => {
+    if (!bulkStaffId || !selectedDays.length) return;
+    const shift = { staffId: bulkStaffId, start: bulkStart, end: bulkEnd };
+    if (bulkType === "once") {
+      patchDraft((prev) => {
+        const ovr = { ...(prev.__overrides || {}) };
+        selectedDays.forEach((d) => {
+          const date = nthWeekdayDate(d, bulkDate);
+          ovr[date] = [...(ovr[date] || []), shift];
+        });
+        return { ...prev, __overrides: ovr };
+      });
+    } else {
+      patchDraft((prev) => {
+        const next = { ...prev };
+        selectedDays.forEach((d) => {
+          next[d] = [...(Array.isArray(prev[d]) ? prev[d] : []), shift];
+        });
+        return next;
+      });
+    }
+    setSelectedDays([]); setBulkStaffId("");
+  };
+
+  const removeWeeklyShift = (day, idx) => {
+    patchDraft((prev) => ({ ...prev, [day]: (Array.isArray(prev[day]) ? prev[day] : []).filter((_, i) => i !== idx) }));
+  };
+  const overrides = draft.__overrides || {};
+  const removeOverride = (date, idx) => {
+    patchDraft((prev) => {
+      const ovr = { ...(prev.__overrides || {}) };
+      const arr = (ovr[date] || []).filter((_, i) => i !== idx);
+      if (arr.length === 0) delete ovr[date]; else ovr[date] = arr;
+      return { ...prev, __overrides: ovr };
+    });
   };
 
   return (
     <>
-      <Card title="שיבוץ נוכחות שבועי" icon={CalendarCheck}>
+      {/* ── Default staff ── */}
+      <Card title="בלנית/ות ברירת מחדל למקווה זה" icon={Users}>
         <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
-          אפשר לשבץ כמה בלניות לאותו ערב, עם חלוקת שעות ביניהן. השיבוץ משמש כברירת מחדל להצגה — כניסה בפועל בטאבלט תמיד גוברת עליו.
+          מוצגות בכל יום שאין בו שיבוץ ספציפי. כל מקווה מנהל ברירת מחדל משלו.
         </p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {WEEKDAYS_HE.map((day, i) => {
-            const shifts = scheduleShifts(data.defaultSchedule, i);
-            const draft = dayForm[i] || { staffId: "", start: "20:00", end: "22:00" };
-            return (
-              <div key={i} style={{ borderTop: i === 0 ? "none" : "1px solid #00000010", paddingTop: i === 0 ? 0 : 12 }}>
-                <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 8 }}>{day}</div>
-                {shifts.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
-                    {shifts.map((s, idx) => {
-                      const st = data.staff.find((x) => x.id === s.staffId);
-                      return (
-                        <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.seafoam, borderRadius: 9, padding: "7px 11px" }}>
-                          <span style={{ fontSize: 13 }}>{st ? st.name : "בלנית לא ידועה"}{s.start && <span style={{ color: "#7a8f8d" }}> · {s.start}–{s.end || "?"}</span>}</span>
-                          <button onClick={() => removeShift(i, idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={14} /></button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <select style={{ ...inputStyle, width: "auto", minWidth: 140 }} value={draft.staffId} onChange={(e) => updateDraft(i, { staffId: e.target.value })}>
-                    <option value="">בחירת בלנית…</option>
-                    {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                  <input type="time" style={{ ...inputStyle, width: "auto" }} value={draft.start} onChange={(e) => updateDraft(i, { start: e.target.value })} />
-                  <span style={{ fontSize: 13 }}>–</span>
-                  <input type="time" style={{ ...inputStyle, width: "auto" }} value={draft.end} onChange={(e) => updateDraft(i, { end: e.target.value })} />
-                  <button style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5 }} onClick={() => addShift(i)}><Plus size={13} /> הוספת שיבוץ</button>
+        {defaultShifts.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+            {defaultShifts.map((s, idx) => {
+              const st = data.staff.find((x) => x.id === s.staffId);
+              return (
+                <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.aquaLight, borderRadius: 9, padding: "8px 12px" }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                    {st?.name || "?"}{s.start && <span style={{ fontWeight: 400, color: "#7a8f8d" }}> · {s.start}–{s.end || "?"}</span>}
+                  </span>
+                  <button onClick={() => removeDefaultShift(idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={14} /></button>
                 </div>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <select style={{ ...inputStyle, width: "auto", minWidth: 140 }} value={defStaffId} onChange={(e) => setDefStaffId(e.target.value)}>
+            <option value="">בחרי בלנית…</option>
+            {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <input type="time" style={{ ...inputStyle, width: "auto" }} value={defStart} onChange={(e) => setDefStart(e.target.value)} />
+          <span>–</span>
+          <input type="time" style={{ ...inputStyle, width: "auto" }} value={defEnd} onChange={(e) => setDefEnd(e.target.value)} />
+          <button style={{ ...btnGhost, opacity: defStaffId ? 1 : 0.4 }} onClick={addDefaultShift} disabled={!defStaffId}><Plus size={14} /> הוספה</button>
+        </div>
+      </Card>
+
+      {/* ── Bulk add ── */}
+      <Card title="הוספת שיבוץ — קבוע או חד-פעמי" icon={CalendarCheck}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          {[["כולם", selectAll], ["א'–ה'", selectWeekdays]].map(([label, fn]) => (
+            <button key={label} onClick={fn} style={{ ...btnGhost, padding: "5px 10px", fontSize: 12 }}>{label}</button>
+          ))}
+          {WEEKDAYS_HE.map((day, i) => (
+            <button key={i} onClick={() => toggleDay(i)} style={{
+              ...btnBase(selectedDays.includes(i) ? COLORS.teal : "#fff", selectedDays.includes(i) ? "#fff" : COLORS.ink),
+              fontSize: 12.5, padding: "6px 11px", border: `1px solid ${selectedDays.includes(i) ? COLORS.teal : "#00000018"}`,
+            }}>{day}</button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+          <select style={{ ...inputStyle, width: "auto", minWidth: 140 }} value={bulkStaffId} onChange={(e) => setBulkStaffId(e.target.value)}>
+            <option value="">בחרי בלנית…</option>
+            {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <input type="time" style={{ ...inputStyle, width: "auto" }} value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} />
+          <span>–</span>
+          <input type="time" style={{ ...inputStyle, width: "auto" }} value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} />
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          {[["weekly", "קבוע (כל שבוע)"], ["once", "חד-פעמי (תאריך)"]].map(([id, label]) => (
+            <button key={id} onClick={() => setBulkType(id)} style={{
+              ...btnBase(bulkType === id ? COLORS.teal : "#fff", bulkType === id ? "#fff" : COLORS.ink),
+              fontSize: 13, padding: "8px 13px", border: `1px solid ${bulkType === id ? COLORS.teal : "#00000018"}`,
+            }}>{label}</button>
+          ))}
+          {bulkType === "once" && <input type="date" style={{ ...inputStyle, width: "auto" }} value={bulkDate} onChange={(e) => setBulkDate(e.target.value)} />}
+        </div>
+        <button style={{ ...btnGhost, opacity: (bulkStaffId && selectedDays.length) ? 1 : 0.4 }}
+          onClick={addBulkShift} disabled={!bulkStaffId || !selectedDays.length}>
+          <Plus size={14} /> {bulkType === "once" ? "הוספת שיבוץ חד-פעמי" : "הוספת שיבוץ קבוע"}
+        </button>
+      </Card>
+
+      {/* ── Weekly schedule ── */}
+      <Card title="שיבוץ שבועי קבוע" icon={CalendarCheck}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {WEEKDAYS_HE.map((day, i) => {
+            const shifts = Array.isArray(draft[i]) ? draft[i] : [];
+            const defNames = defaultShifts.map((s) => { const st = data.staff.find((x) => x.id === s.staffId); return (st?.name || "?") + (s.start ? ` ${s.start}–${s.end}` : ""); }).join(", ");
+            return (
+              <div key={i} style={{ borderTop: i > 0 ? "1px solid #00000010" : "none", paddingTop: i > 0 ? 10 : 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 5, color: COLORS.teal }}>{day}</div>
+                {shifts.length === 0 && <div style={{ fontSize: 12, color: "#b0c4c2" }}>{defNames ? `ברירת מחדל: ${defNames}` : "ללא שיבוץ"}</div>}
+                {shifts.map((s, idx) => {
+                  const st = data.staff.find((x) => x.id === s.staffId);
+                  return (
+                    <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.aquaLight, borderRadius: 9, padding: "7px 11px", marginBottom: 4 }}>
+                      <span style={{ fontSize: 13 }}><b>{st?.name || "?"}</b>{s.start && <span style={{ color: "#7a8f8d" }}> · {s.start}–{s.end || "?"}</span>}</span>
+                      <button onClick={() => removeWeeklyShift(i, idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={14} /></button>
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
         </div>
       </Card>
 
-      <Card title="נוכחות וכניסות בפועל" icon={CalendarCheck}>
+      {/* ── One-time overrides ── */}
+      {Object.keys(overrides).length > 0 && (
+        <Card title="שיבוצים חד-פעמיים" icon={CalendarCheck}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {Object.entries(overrides).sort().map(([date, shifts]) => (
+              <div key={date} style={{ background: COLORS.goldLight, borderRadius: 10, padding: "10px 14px" }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{fmtDate(date)}</div>
+                {(Array.isArray(shifts) ? shifts : [shifts]).map((s, idx) => {
+                  const st = data.staff.find((x) => x.id === s.staffId);
+                  return (
+                    <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: 12.5 }}>{st?.name || "?"}{s.start ? ` · ${s.start}–${s.end}` : ""}</span>
+                      <button onClick={() => removeOverride(date, idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={14} /></button>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* ── Save button ── */}
+      <div style={{ background: COLORS.paper, borderRadius: 14, padding: 16, border: `1px solid ${COLORS.aqua}22`, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <button style={{ ...btnPrimary, fontSize: 15, padding: "12px 24px", opacity: saving ? 0.6 : 1 }} onClick={saveAll} disabled={saving}>
+          {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Check size={16} />}
+          {saving ? "שומר…" : "שמירת כל השיבוצים"}
+        </button>
+        {saved && <span style={{ fontSize: 13.5, color: COLORS.teal, fontWeight: 700 }}>✓ נשמר בהצלחה ב-Firestore</span>}
+        {error && <span style={{ fontSize: 13, color: COLORS.red, fontWeight: 600 }}>{error}</span>}
+        <span style={{ fontSize: 12, color: "#7a8f8d" }}>שינויים שלא נשמרו לא יישמרו אחרי רענון</span>
+      </div>
+
+      {/* ── Actual login log ── */}
+      <Card title="כניסות בפועל" icon={CalendarCheck}>
         <Table headers={["בלנית", "תאריך", "שעה"]}
           rows={recent.map((l) => [l.staffName, fmtDate(l.ts), fmtDateTime(l.ts).split(" ")[1]])}
-          empty="עדיין אין רישומי כניסה — יתעדכן כשבלנית תתחבר בטאבלט." />
+          empty="עדיין אין רישומי כניסה." />
       </Card>
     </>
   );
+}
+
+function nthWeekdayDate(dayIdx, baseDate) {
+  const base = new Date(baseDate);
+  const diff = dayIdx - base.getDay();
+  const result = new Date(base);
+  result.setDate(base.getDate() + diff);
+  return result.toISOString().slice(0, 10);
 }
 
 function AdminWater({ data }) {
@@ -1851,6 +2401,147 @@ function AdminWater({ data }) {
             </LineChart>
           </ResponsiveContainer>
         </div>
+      )}
+    </Card>
+  );
+}
+
+function AdminDippersReport({ mikvehsCtl, currentMikveh }) {
+  const mikvehs = mikvehsCtl.list;
+  const [selectedMikvehId, setSelectedMikvehId] = useState("all");
+  const [period, setPeriod] = useState("month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState(todayStr());
+  const [allLogs, setAllLogs] = useState(null);
+
+  // Load dippers logs for all mikvehs
+  useEffect(() => {
+    let active = true;
+    setAllLogs(null);
+    (async () => {
+      const results = await Promise.all(mikvehs.map(async (m) => {
+        const raw = await storage.get(`dippers-log:${m.id}`).catch(() => null);
+        return { mikvehId: m.id, mikvehName: m.name, entries: Array.isArray(raw) ? raw : [] };
+      }));
+      if (active) setAllLogs(results);
+    })();
+    return () => { active = false; };
+  }, [mikvehs]);
+
+  const now = new Date();
+  const filtered = useMemo(() => {
+    if (!allLogs) return [];
+    let from, to;
+    if (period === "24h") { from = new Date(now.getTime() - 24 * 3600000); to = now; }
+    else if (period === "month") { from = new Date(now.getFullYear(), now.getMonth(), 1); to = now; }
+    else if (period === "year") { from = new Date(now.getFullYear(), 0, 1); to = now; }
+    else { from = customFrom ? new Date(customFrom) : new Date(0); to = customTo ? new Date(customTo + "T23:59:59") : now; }
+
+    const sources = selectedMikvehId === "all" ? allLogs : allLogs.filter((s) => s.mikvehId === selectedMikvehId);
+    const rows = [];
+    sources.forEach(({ mikvehId, mikvehName, entries }) => {
+      entries.forEach((e) => {
+        const d = new Date(e.date + (e.time ? "T" + e.time : ""));
+        if (d >= from && d <= to) rows.push({ ...e, mikvehId, mikvehName });
+      });
+    });
+    return rows.sort((a, b) => (b.date + (b.time || "")) < (a.date + (a.time || "")) ? -1 : 1);
+  }, [allLogs, selectedMikvehId, period, customFrom, customTo]);
+
+  const totals = filtered.reduce((acc, e) => ({
+    count: acc.count + 1,
+    cash: acc.cash + (e.cash || 0),
+    credit: acc.credit + (e.credit || 0),
+    prepaid: acc.prepaid + (e.prepaid || 0),
+    pending: acc.pending + (e.status === "pending" ? 1 : 0),
+    exempt: acc.exempt + (e.status === "exempt" ? 1 : 0),
+  }), { count: 0, cash: 0, credit: 0, prepaid: 0, pending: 0, exempt: 0 });
+
+  const durLabel = (e) => DURATION_OPTIONS.find((d) => d.id === e.duration)?.label || e.duration || "—";
+
+  const exportCsv = () => {
+    const header = `תאריך,שעה,מקווה,בלנית,כולל התארגנות,סטטוס תשלום,מזומן,אשראי,מראש\n`;
+    const body = filtered.map((e) => [
+      e.date, e.time || "", e.mikvehName, e.staffName,
+      durLabel(e),
+      e.status === "exempt" ? "פטורה" : e.status === "pending" ? "ממתינה" : "שולם",
+      e.cash || 0, e.credit || 0, e.prepaid || 0,
+    ].join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + header + body], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `דוח-טובלות-${todayStr()}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const PERIODS = [
+    { id: "24h", label: "24 שעות אחרונות" },
+    { id: "month", label: "חודש נוכחי" },
+    { id: "year", label: "שנה נוכחית" },
+    { id: "custom", label: "תקופה בחירה" },
+  ];
+
+  const showMikveh = selectedMikvehId === "all" && mikvehs.length > 1;
+
+  return (
+    <Card title="דוח טובלות" icon={Users}
+      right={<button style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5 }} onClick={exportCsv}><Download size={14} /> ייצוא CSV</button>}>
+
+      {/* Mikveh selector */}
+      {mikvehs.length > 1 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <button onClick={() => setSelectedMikvehId("all")} style={{ ...btnBase(selectedMikvehId === "all" ? COLORS.teal : "#fff", selectedMikvehId === "all" ? "#fff" : COLORS.ink), fontSize: 13, padding: "8px 13px", border: `1px solid ${selectedMikvehId === "all" ? COLORS.teal : "#00000018"}` }}>
+            כל המקוואות
+          </button>
+          {mikvehs.map((m) => (
+            <button key={m.id} onClick={() => setSelectedMikvehId(m.id)} style={{ ...btnBase(selectedMikvehId === m.id ? COLORS.teal : "#fff", selectedMikvehId === m.id ? "#fff" : COLORS.ink), fontSize: 13, padding: "8px 13px", border: `1px solid ${selectedMikvehId === m.id ? COLORS.teal : "#00000018"}` }}>
+              {m.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Period selector */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        {PERIODS.map((p) => (
+          <button key={p.id} onClick={() => setPeriod(p.id)} style={{ ...btnBase(period === p.id ? COLORS.teal : "#fff", period === p.id ? "#fff" : COLORS.ink), fontSize: 13, padding: "8px 13px", border: `1px solid ${period === p.id ? COLORS.teal : "#00000018"}` }}>{p.label}</button>
+        ))}
+      </div>
+      {period === "custom" && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          <Field label="מ-"><input type="date" style={{ ...inputStyle, width: "auto" }} value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} /></Field>
+          <Field label="עד"><input type="date" style={{ ...inputStyle, width: "auto" }} value={customTo} onChange={(e) => setCustomTo(e.target.value)} /></Field>
+        </div>
+      )}
+
+      {allLogs === null ? <CenteredLoading text="טוענת נתונים…" /> : (
+        <>
+          {/* Summary */}
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+            <StatCard label="טובלות" value={totals.count} icon={Users} />
+            <StatCard label="מזומן" value={fmtILS(totals.cash)} icon={Wallet} color={COLORS.gold} />
+            <StatCard label="אשראי" value={fmtILS(totals.credit)} icon={Wallet} color={COLORS.aqua} />
+            <StatCard label="מראש" value={fmtILS(totals.prepaid)} icon={Wallet} />
+            {totals.pending > 0 && <StatCard label="ממתינות לתשלום" value={totals.pending} icon={Clock3} color={COLORS.red} />}
+            {totals.exempt > 0 && <StatCard label="פטורות (כלה)" value={totals.exempt} icon={Gift} color={COLORS.aqua} />}
+          </div>
+
+          {/* Table */}
+          <Table
+            headers={["תאריך", "שעה", ...(showMikveh ? ["מקווה"] : []), "בלנית", "סוג", "תשלום", "סכום"]}
+            rows={filtered.map((e) => [
+              fmtDate(e.date),
+              e.time || "—",
+              ...(showMikveh ? [e.mikvehName] : []),
+              e.staffName || "—",
+              durLabel(e),
+              e.status === "exempt" ? "פטורה" : e.status === "pending" ? "⏳ ממתינה" : "✓ שולם",
+              fmtILS((e.cash || 0) + (e.credit || 0) + (e.prepaid || 0)),
+            ])}
+            empty="אין רשומות בתקופה זו."
+          />
+        </>
       )}
     </Card>
   );
@@ -1971,39 +2662,131 @@ function PublicApp({ mikvehs }) {
   );
 }
 
-function scheduleShifts(defaultSchedule, weekday) {
+function scheduleShifts(defaultSchedule, weekday, dateStr) {
+  if (!defaultSchedule) return [];
+  // 1. Check one-time overrides for this specific date
+  if (dateStr) {
+    const overrides = defaultSchedule.__overrides || {};
+    if (overrides[dateStr]) return overrides[dateStr];
+  }
+  // 2. Weekly recurring shifts
   const v = defaultSchedule[weekday];
-  if (!v) return [];
-  if (Array.isArray(v)) return v;
-  return [{ staffId: v, start: "", end: "" }]; // backward-compat: older version stored a single staff id per day
+  if (Array.isArray(v) && v.length) return v;
+  if (v && typeof v === "string") return [{ staffId: v, start: "", end: "" }]; // old format
+  // 3. Default shifts (multi-staff with hours)
+  if (defaultSchedule.__defaultShifts?.length) return defaultSchedule.__defaultShifts;
+  // 4. Old single-staff __default fallback
+  if (defaultSchedule.__default) return [{ staffId: defaultSchedule.__default, start: "", end: "" }];
+  return [];
 }
 
-function estimateLoad(dippersLog, roomsCount, today) {
+const DURATION_MINUTES = { dip: 20, prep: 60, bride: 120, custom: 30 };
+
+function estimateLoad(dippersLog, mikveh, today, manualLoad) {
+  // Manual override takes full precedence
+  if (manualLoad) return { level: manualLoad, manual: true, freeInMin: null, dipOnlyFree: false };
+
+  const bathRooms = mikveh.bathRooms ?? (mikveh.roomsCount ?? 1);
+  const showerRooms = mikveh.showerRooms ?? 0;
+  const totalRooms = bathRooms + showerRooms;
+
   const now = new Date();
-  const active = dippersLog.filter((e) => {
-    if (e.date !== today || !e.time) return false;
-    const parts = e.time.split(":").map(Number);
-    if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) return false;
-    const start = new Date(now); start.setHours(parts[0], parts[1], 0, 0);
-    const durationMin = e.duration === "prep" ? 60 : 20;
-    const end = new Date(start.getTime() + durationMin * 60000);
-    return now >= start && now < end;
+  // Build active visits with their expected exit times
+  const active = [];
+  dippersLog.filter((e) => e.date === today && !e.exitedAt).forEach((e) => {
+    if (!e.time) return;
+    const [h, m] = e.time.split(":").map(Number);
+    if (isNaN(h) || isNaN(m)) return;
+    const start = new Date(now); start.setHours(h, m, 0, 0);
+    const durMin = e.customMinutes || DURATION_MINUTES[e.duration] || 20;
+    const end = new Date(start.getTime() + durMin * 60000);
+    if (now < end) {
+      active.push({ needsPrep: e.duration !== "dip", exitAt: end, durMin });
+    }
   });
-  const occupied = active.reduce((s, e) => s + (e.count || 1), 0);
-  const rooms = roomsCount || 1;
-  return { occupied, rooms, busy: occupied / rooms >= 0.8 };
+
+  const prepCount = active.filter((a) => a.needsPrep).length;
+  const dipOnlyCount = active.filter((a) => !a.needsPrep).length;
+
+  // Capacity check: prep visitors need bath rooms, dip-only can use any room
+  const prepOverflow = Math.max(0, prepCount - bathRooms);
+  const dipOnlyOverflow = Math.max(0, (dipOnlyCount + Math.min(prepCount, bathRooms)) - totalRooms);
+  const overflow = prepOverflow + dipOnlyOverflow;
+  const total = active.length;
+
+  // Next room to free up
+  const sortedExits = active.map((a) => a.exitAt).sort((a, b) => a - b);
+  const freeInMin = sortedExits.length ? Math.max(0, Math.round((sortedExits[0] - now) / 60000)) : null;
+
+  // Can dip-only visitors enter even if prep rooms are full?
+  const dipOnlyFree = showerRooms > 0 && dipOnlyCount < showerRooms;
+
+  let level = "green";
+  if (overflow > 0) level = "red";
+  else if (total / totalRooms >= 0.8) level = "orange";
+
+  return { level, manual: false, freeInMin, dipOnlyFree, total, totalRooms, prepCount, dipOnlyCount, overflow };
+}
+
+function LoadBadge({ load, inline }) {
+  if (!load) return null;
+  const colors = { green: "#22c55e", orange: "#f97316", red: "#ef4444" };
+  const labels = { green: "פנוי", orange: "עמוס", red: "מלא" };
+  const bg = { green: "#dcfce7", orange: "#ffedd5", red: "#fee2e2" };
+  const c = colors[load.level] || colors.green;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <span style={{
+        display: "inline-flex", alignItems: "center", gap: 6,
+        background: bg[load.level], color: c, borderRadius: 10, padding: "4px 11px",
+        fontWeight: 700, fontSize: inline ? 12 : 13.5,
+      }}>
+        <span style={{ width: 10, height: 10, borderRadius: "50%", background: c, flexShrink: 0 }} />
+        {labels[load.level]}{load.manual ? " (ידני)" : ""}
+      </span>
+      {load.freeInMin != null && load.level !== "green" && (
+        <span style={{ fontSize: 11.5, color: "#7a8f8d" }}>
+          חדר פנוי בעוד ~{load.freeInMin} ד׳
+        </span>
+      )}
+      {load.dipOnlyFree && load.level !== "green" && (
+        <span style={{ fontSize: 11.5, background: "#dbeafe", color: "#1d4ed8", padding: "2px 8px", borderRadius: 8, fontWeight: 600 }}>
+          חדר מקלחת פנוי (טבילה בלבד)
+        </span>
+      )}
+    </div>
+  );
 }
 
 function tonightStaff(data, weekday, today) {
-  const actual = data.loginLog.filter((l) => l.ts.slice(0, 10) === today);
-  if (actual.length) return { names: actual.map((l) => l.staffName), isActual: true };
-  const shifts = scheduleShifts(data.defaultSchedule, weekday);
-  const names = shifts.map((s) => {
+  if (!data || !data.defaultSchedule) return { shifts: [], names: [], isActual: false };
+  const todayRec = data.checklist[today];
+  const shiftClosed = !!(todayRec && todayRec.closed);
+
+  // Only use actual logins when the shift is currently open
+  if (!shiftClosed) {
+    const actual = data.loginLog.filter((l) => l.ts.slice(0, 10) === today);
+    const scheduled = scheduleShifts(data.defaultSchedule, weekday, today);
+    if (actual.length) {
+      const shifts = actual.map((l) => {
+        const match = scheduled.find((s) => {
+          const st = data.staff.find((x) => x.id === s.staffId);
+          return st && st.name === l.staffName;
+        });
+        return { name: l.staffName, start: match?.start || "", end: match?.end || "", isActual: true };
+      });
+      return { shifts, names: shifts.map((s) => s.name), isActual: true };
+    }
+  }
+
+  // Shift closed or no actual login yet — show scheduled/default
+  const scheduled = scheduleShifts(data.defaultSchedule, weekday, today);
+  const shifts = scheduled.map((s) => {
     const st = data.staff.find((x) => x.id === s.staffId);
     if (!st) return null;
-    return s.start ? `${st.name} (${s.start}–${s.end || "?"})` : st.name;
+    return { name: st.name, start: s.start || "", end: s.end || "", isActual: false };
   }).filter(Boolean);
-  return { names, isActual: false };
+  return { shifts, names: shifts.map((s) => s.name), isActual: false };
 }
 
 function PublicMikvehDetail({ mikveh }) {
@@ -2015,8 +2798,8 @@ function PublicMikvehDetail({ mikveh }) {
   const isOpenDay = todaysHours !== "סגור";
   const [expanded, setExpanded] = useState(false);
 
-  const { names: tonightNames } = tonightStaff(data, weekday, today);
-  const load = estimateLoad(data.dippersLog, mikveh.roomsCount, today);
+  const { shifts: tonightShifts, names: tonightNames, isActual: tonightIsActual } = tonightStaff(data, weekday, today);
+  const load = estimateLoad(data.dippersLog, mikveh, today, mikveh.manualLoad);
   const todayRec = data.checklist[today];
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
 
@@ -2035,13 +2818,23 @@ function PublicMikvehDetail({ mikveh }) {
             <span style={{ width: 10, height: 10, borderRadius: "50%", background: isOpenDay ? "#8CE0B0" : "#EFA6A0" }} />
             <span style={{ fontWeight: 700, fontSize: 14 }}>{isOpenDay ? "פתוח היום" : "סגור היום"}</span>
             {isOpenDay && todayRec?.opened && !todayRec?.closed && (
-              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: 8, background: load.busy ? "#F3D8CE" : "#ffffff26", color: load.busy ? "#5C2A16" : "#fff" }}>
-                <Bath size={12} /> {load.busy ? "עומס גבוה כרגע (הערכה)" : "אין עומס מיוחד (הערכה)"}
-              </span>
+              <LoadBadge load={load} inline />
             )}
           </div>
           <h1 className="font-display" style={{ margin: "0 0 6px", fontSize: 26 }}>{mikveh.name}</h1>
-          <p style={{ margin: 0, opacity: 0.95, fontSize: 15 }}>שעות פתיחה היום ({WEEKDAYS_HE[weekday]}): <b>{todaysHours}</b>{tonightNames.length > 0 && <> · בלנית הערב: <b>{tonightNames.join(", ")}</b></>}</p>
+          <p style={{ margin: "0 0 6px", opacity: 0.95, fontSize: 15 }}>שעות פתיחה היום ({WEEKDAYS_HE[weekday]}): <b>{todaysHours}</b></p>
+          {tonightShifts.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {tonightShifts.map((s, i) => (
+                <p key={i} style={{ margin: 0, opacity: 0.9, fontSize: 14 }}>
+                  {i === 0 ? "בלנית הערב: " : <span style={{ opacity: 0 }}>בלנית הערב: </span>}
+                  <b>{s.name}</b>
+                  {s.start ? <> · {s.start}–{s.end || "?"}</> : ""}
+                  {!tonightIsActual && <span style={{ opacity: 0.7, fontSize: 12 }}> (משובצת)</span>}
+                </p>
+              ))}
+            </div>
+          )}
           <p style={{ marginTop: 4, opacity: 0.9, fontSize: 13 }}>{mikveh.address}{mikveh.phone && <> · {mikveh.phone}</>}</p>
           {(mikveh.pinnedNote || todayRec?.dailyNote) && (
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
@@ -2062,6 +2855,11 @@ function PublicMikvehDetail({ mikveh }) {
             {mikveh.paymentUrl && (
               <a href={mikveh.paymentUrl} target="_blank" rel="noreferrer" style={{ ...btnBase("#ffffff22", "#fff"), textDecoration: "none" }}>
                 <Wallet size={15} /> לתשלום מקוון
+              </a>
+            )}
+            {mikveh.feedbackUrl && (
+              <a href={mikveh.feedbackUrl} target="_blank" rel="noreferrer" style={{ ...btnBase("#ffffff22", "#fff"), textDecoration: "none" }}>
+                <MessageSquare size={15} /> משוב
               </a>
             )}
             <button onClick={() => setExpanded((x) => !x)} style={{ ...btnBase("#ffffff22", "#fff") }}>
@@ -2087,36 +2885,69 @@ function PublicMikvehDetail({ mikveh }) {
           <Card title="שעות פתיחה שבועיות" icon={Clock}>
             <Table headers={["יום", "שעות"]} rows={hours.map((d) => [d.day, d.hours])} empty="" />
           </Card>
-          {(mikveh.photos || []).length > 0 && (
-            <Card title="תמונות מהמקווה" icon={Image}>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                {mikveh.photos.map((url, i) => (
-                  <img key={i} src={url} alt="" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012" }}
-                    onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                ))}
-              </div>
-            </Card>
-          )}
-          {mikveh.notes && (
-            <Card title="מידע נוסף מהמקווה" icon={StickyNote}>
-              <p style={{ fontSize: 14, lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap" }}>{mikveh.notes}</p>
-            </Card>
-          )}
-          {(mikveh.accessible || (mikveh.amenities || []).length > 0) && (
-            <Card title="נגישות ומוצרים במקום" icon={Accessibility}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {[
-                  mikveh.accessible ? "מעלון נגיש לבעלות מוגבלות" : null,
-                  ...(mikveh.amenities || []),
-                ].filter(Boolean).map((f, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                    <Check size={16} color={COLORS.aqua} /><span style={{ fontSize: 14 }}>{f}</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
+          {(mikveh.photos || []).length > 0 && <PublicMikvehDetailPhotos photos={mikveh.photos} />}
+          <PublicMikvehDetailExtras mikveh={mikveh} />
         </div>
+      )}
+    </>
+  );
+}
+
+function PhotoGallery({ photos }) {
+  const [selected, setSelected] = useState(null);
+  return (
+    <>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {photos.map((url, i) => (
+          <img key={i} src={url} alt="" onClick={() => setSelected(url)}
+            style={{ width: 160, height: 120, objectFit: "cover", borderRadius: 10, border: "1px solid #00000012", cursor: "zoom-in" }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }} />
+        ))}
+      </div>
+      {selected && (
+        <div onClick={() => setSelected(null)}
+          style={{ position: "fixed", inset: 0, background: "#000000cc", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, cursor: "zoom-out" }}>
+          <img src={selected} alt="" style={{ maxWidth: "90vw", maxHeight: "88vh", borderRadius: 12, boxShadow: "0 8px 40px #000a" }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          <button onClick={() => setSelected(null)} style={{
+            position: "fixed", top: 16, left: 16, background: "#fff2", border: "none", borderRadius: "50%",
+            width: 38, height: 38, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff",
+          }}><X size={20} /></button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function PublicMikvehDetailPhotos({ photos }) {
+  return (
+    <Card title="תמונות מהמקווה" icon={Image}>
+      <PhotoGallery photos={photos} />
+    </Card>
+  );
+}
+
+function PublicMikvehDetailExtras({ mikveh }) {
+  return (
+    <>
+      {mikveh.notes && (
+        <Card title="מידע נוסף מהמקווה" icon={StickyNote}>
+          <p style={{ fontSize: 14, lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap" }}>{mikveh.notes}</p>
+        </Card>
+      )}
+      {(mikveh.accessible || (mikveh.amenities || []).length > 0) && (
+        <Card title="נגישות ומוצרים במקום" icon={Accessibility}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {[
+              mikveh.accessible ? "מעלון נגיש לבעלות מוגבלות" : null,
+              ...(mikveh.amenities || []),
+            ].filter(Boolean).map((f, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <Check size={16} color={COLORS.aqua} /><span style={{ fontSize: 14 }}>{f}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
     </>
   );
