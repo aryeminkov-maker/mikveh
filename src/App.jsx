@@ -1846,14 +1846,19 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
 
   const toggleDay = (i) => setSelDays((p) => p.includes(i) ? p.filter((d) => d !== i) : [...p, i]);
   const addBulkShift = () => {
-    if (!bulkStaffId || !selDays.length) return;
-    const shift = { staffId: bulkStaffId, start: bulkStart, end: bulkEnd };
+    if (!bulkStaffId) return;
+    if (bulkType === "weekly" && !selDays.length) return;
+    const shift = { staffId: bulkStaffId, start: bulkStart || "", end: bulkEnd || "" };
     if (bulkType === "once") {
-      patchAtt((p) => { const ovr = { ...(p.__overrides || {}) }; selDays.forEach((d) => { const date = nthWeekdayDate(d, bulkDate); ovr[date] = [...(ovr[date] || []), shift]; }); return { ...p, __overrides: ovr }; });
+      patchAtt((p) => { const ovr = { ...(p.__overrides || {}) }; const date = bulkType === "once" ? bulkDate : nthWeekdayDate(0, todayStr()); ovr[date] = [...(ovr[date] || []), shift]; return { ...p, __overrides: ovr }; });
+    } else if (selDays.length === 7) {
+      // All days = default shifts
+      const next = [...((ad.__defaultShifts) || []), shift];
+      patchAtt((p) => ({ ...p, __defaultShifts: next, __default: next[0]?.staffId || null }));
     } else {
       patchAtt((p) => { const next = { ...p }; selDays.forEach((d) => { next[d] = [...(Array.isArray(p[d]) ? p[d] : []), shift]; }); return next; });
     }
-    setSelDays([]); setBulkStaffId("");
+    setSelDays([]); setBulkStaffId(""); setBulkStart("20:00"); setBulkEnd("23:30");
   };
   const removeWeeklyShift = (day, idx) => patchAtt((p) => ({ ...p, [day]: (Array.isArray(p[day]) ? p[day] : []).filter((_, i) => i !== idx) }));
   const removeOverride = (date, idx) => patchAtt((p) => { const ovr = { ...(p.__overrides || {}) }; const arr = (ovr[date] || []).filter((_, i) => i !== idx); if (!arr.length) delete ovr[date]; else ovr[date] = arr; return { ...p, __overrides: ovr }; });
@@ -1973,89 +1978,98 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
             {attendanceDraft === null
               ? <CenteredLoading text="טוענת שיבוצים…" />
               : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {/* Default shifts */}
-                <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 8 }}>בלנית/ות ברירת מחדל</div>
-                  {defaultShifts.map((s, idx) => {
-                    const st = data.staff.find((x) => x.id === s.staffId);
-                    return (
-                      <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.aquaLight, borderRadius: 8, padding: "7px 11px", marginBottom: 5 }}>
-                        <span style={{ fontSize: 13, fontWeight: 600 }}>{st?.name || "?"}{s.start && <span style={{ fontWeight: 400, color: "#7a8f8d" }}> · {s.start}–{s.end}</span>}</span>
-                        <button type="button" onClick={() => removeDefaultShift(idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={13} /></button>
-                      </div>
-                    );
-                  })}
-                  <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", marginTop: 5 }}>
-                    <select style={{ ...inputStyle, width: "auto", minWidth: 130 }} value={defStaffId} onChange={(e) => setDefStaffId(e.target.value)}>
-                      <option value="">בחרי בלנית…</option>
-                      {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                    <input type="time" style={{ ...inputStyle, width: "auto" }} value={defStart} onChange={(e) => setDefStart(e.target.value)} />
-                    <span>–</span>
-                    <input type="time" style={{ ...inputStyle, width: "auto" }} value={defEnd} onChange={(e) => setDefEnd(e.target.value)} />
-                    <button type="button" style={{ ...btnGhost, opacity: defStaffId ? 1 : 0.4 }} onClick={addDefaultShift} disabled={!defStaffId}><Plus size={13} /></button>
-                  </div>
-                </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                <p style={{ fontSize: 12.5, color: "#7a8f8d", margin: "0 0 14px" }}>
+                  שיבוץ קבוע חוזר כל שבוע. שיבוץ חד-פעמי גובר עליו לתאריך ספציפי.
+                  בלנית ללא שעות = אחראית כל שעות הפעילות.
+                </p>
 
-                {/* Bulk add */}
-                <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 8 }}>הוספת שיבוץ</div>
-                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
-                    <button type="button" onClick={() => setSelDays([0,1,2,3,4,5,6])} style={{ ...btnGhost, padding: "4px 9px", fontSize: 12 }}>כולם</button>
-                    <button type="button" onClick={() => setSelDays([0,1,2,3,4])} style={{ ...btnGhost, padding: "4px 9px", fontSize: 12 }}>א'–ה'</button>
-                    {WEEKDAYS_HE.map((day, i) => (
-                      <button type="button" key={i} onClick={() => toggleDay(i)} style={{ ...btnBase(selDays.includes(i) ? COLORS.teal : "#fff", selDays.includes(i) ? "#fff" : COLORS.ink), fontSize: 12, padding: "5px 10px", border: `1px solid ${selDays.includes(i) ? COLORS.teal : "#00000018"}` }}>{day}</button>
-                    ))}
-                  </div>
-                  <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-                    <select style={{ ...inputStyle, width: "auto", minWidth: 130 }} value={bulkStaffId} onChange={(e) => setBulkStaffId(e.target.value)}>
+                {/* ── Add shift form ── */}
+                <div style={{ background: COLORS.seafoam, borderRadius: 12, padding: 14, marginBottom: 16 }}>
+                  {/* Staff */}
+                  <div style={{ marginBottom: 10 }}>
+                    <select style={{ ...inputStyle, width: "100%" }} value={bulkStaffId} onChange={(e) => setBulkStaffId(e.target.value)}>
                       <option value="">בחרי בלנית…</option>
                       {data.staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
+                  </div>
+                  {/* Hours — optional */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12.5, color: "#7a8f8d", flexShrink: 0 }}>שעות (אופציונלי):</span>
                     <input type="time" style={{ ...inputStyle, width: "auto" }} value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} />
                     <span>–</span>
                     <input type="time" style={{ ...inputStyle, width: "auto" }} value={bulkEnd} onChange={(e) => setBulkEnd(e.target.value)} />
+                    <button type="button" onClick={() => { setBulkStart(""); setBulkEnd(""); }} style={{ fontSize: 11, color: "#aaa", background: "none", border: "none", cursor: "pointer" }}>נקה שעות</button>
                   </div>
-                  <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 8 }}>
-                    {[["weekly", "קבוע"], ["once", "חד-פעמי"]].map(([id, lbl]) => (
-                      <button type="button" key={id} onClick={() => setBulkType(id)} style={{ ...btnBase(bulkType === id ? COLORS.teal : "#fff", bulkType === id ? "#fff" : COLORS.ink), fontSize: 12.5, padding: "6px 12px", border: `1px solid ${bulkType === id ? COLORS.teal : "#00000018"}` }}>{lbl}</button>
+                  {/* Permanent or one-time */}
+                  <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                    {[["weekly", "קבוע (כל שבוע)"], ["once", "חד-פעמי (תאריך)"]].map(([id, lbl]) => (
+                      <button type="button" key={id} onClick={() => setBulkType(id)} style={{
+                        ...btnBase(bulkType === id ? COLORS.teal : "#fff", bulkType === id ? "#fff" : COLORS.ink),
+                        flex: 1, justifyContent: "center", fontSize: 13, padding: "8px 0",
+                        border: `1.5px solid ${bulkType === id ? COLORS.teal : "#00000018"}`,
+                      }}>{lbl}</button>
                     ))}
-                    {bulkType === "once" && <input type="date" style={{ ...inputStyle, width: "auto" }} value={bulkDate} onChange={(e) => setBulkDate(e.target.value)} />}
                   </div>
-                  <button type="button" style={{ ...btnGhost, opacity: (bulkStaffId && selDays.length) ? 1 : 0.4 }} onClick={addBulkShift} disabled={!bulkStaffId || !selDays.length}>
+                  {/* Days (for weekly) or date (for once) */}
+                  {bulkType === "weekly" ? (
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 10 }}>
+                      <button type="button" onClick={() => setSelDays([0,1,2,3,4,5,6])} style={{ ...btnGhost, padding: "4px 9px", fontSize: 12 }}>כולם</button>
+                      <button type="button" onClick={() => setSelDays([0,1,2,3,4])} style={{ ...btnGhost, padding: "4px 9px", fontSize: 12 }}>א'–ה'</button>
+                      {WEEKDAYS_HE.map((day, i) => (
+                        <button type="button" key={i} onClick={() => toggleDay(i)} style={{
+                          ...btnBase(selDays.includes(i) ? COLORS.teal : "#fff", selDays.includes(i) ? "#fff" : COLORS.ink),
+                          fontSize: 12, padding: "5px 10px", border: `1px solid ${selDays.includes(i) ? COLORS.teal : "#00000018"}`,
+                        }}>{day}</button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ marginBottom: 10 }}>
+                      <input type="date" style={{ ...inputStyle, width: "auto" }} value={bulkDate} onChange={(e) => setBulkDate(e.target.value)} />
+                    </div>
+                  )}
+                  <button type="button"
+                    style={{ ...btnPrimary, opacity: (bulkStaffId && (bulkType === "once" || selDays.length)) ? 1 : 0.4 }}
+                    onClick={addBulkShift}
+                    disabled={!bulkStaffId || (bulkType === "weekly" && !selDays.length)}>
                     <Plus size={13} /> הוספת שיבוץ
                   </button>
                 </div>
 
-                {/* Weekly view */}
-                <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 8 }}>שיבוץ שבועי קבוע</div>
-                  {WEEKDAYS_HE.map((day, i) => {
-                    const shifts = Array.isArray(ad[i]) ? ad[i] : [];
-                    const defNames = defaultShifts.map((s) => data.staff.find((x) => x.id === s.staffId)?.name || "?").join(", ");
-                    return (
-                      <div key={i} style={{ borderTop: i > 0 ? "1px solid #f0f0f0" : "none", paddingTop: i > 0 ? 8 : 0, marginBottom: 8 }}>
-                        <div style={{ fontWeight: 700, fontSize: 12.5, color: COLORS.teal, marginBottom: 4 }}>{day}</div>
-                        {shifts.length === 0 && <div style={{ fontSize: 11.5, color: "#b0c4c2" }}>{defNames ? `ברירת מחדל: ${defNames}` : "ללא שיבוץ"}</div>}
-                        {shifts.map((s, idx) => {
+                {/* ── Current schedule summary ── */}
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 10 }}>שיבוץ קבוע</div>
+                {WEEKDAYS_HE.map((day, i) => {
+                  const weeklyShifts = Array.isArray(ad[i]) ? ad[i] : [];
+                  const defShifts = ad.__defaultShifts || (ad.__default ? [{ staffId: ad.__default, start: "", end: "" }] : []);
+                  const shown = weeklyShifts.length ? weeklyShifts : defShifts;
+                  const isDefault = weeklyShifts.length === 0 && defShifts.length > 0;
+                  return (
+                    <div key={i} style={{ borderTop: "1px solid #f0f0f0", padding: "8px 0" }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: COLORS.ink, marginBottom: 4 }}>{day}</div>
+                      {shown.length === 0
+                        ? <div style={{ fontSize: 11.5, color: "#ccc" }}>ללא שיבוץ</div>
+                        : shown.map((s, idx) => {
                           const st = data.staff.find((x) => x.id === s.staffId);
                           return (
-                            <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: COLORS.aquaLight, borderRadius: 8, padding: "5px 10px", marginBottom: 3 }}>
-                              <span style={{ fontSize: 12.5 }}><b>{st?.name || "?"}</b>{s.start && <span style={{ color: "#7a8f8d" }}> · {s.start}–{s.end}</span>}</span>
-                              <button type="button" onClick={() => removeWeeklyShift(i, idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={12} /></button>
+                            <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: isDefault ? COLORS.seafoam : COLORS.aquaLight, borderRadius: 8, padding: "5px 10px", marginBottom: 3 }}>
+                              <span style={{ fontSize: 12.5 }}>
+                                {isDefault && <span style={{ fontSize: 10.5, color: "#aaa", marginLeft: 5 }}>ברירת מחדל · </span>}
+                                <b>{st?.name || "?"}</b>
+                                {s.start && <span style={{ color: "#7a8f8d", fontWeight: 400 }}> · {s.start}–{s.end}</span>}
+                              </span>
+                              {!isDefault && <button type="button" onClick={() => removeWeeklyShift(i, idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={12} /></button>}
                             </div>
                           );
-                        })}
-                      </div>
-                    );
-                  })}
-                </div>
+                        })
+                      }
+                    </div>
+                  );
+                })}
 
-                {/* One-time overrides */}
+                {/* ── One-time overrides ── */}
                 {Object.keys(ad.__overrides || {}).length > 0 && (
-                  <div>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 8 }}>שיבוצים חד-פעמיים</div>
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.gold, marginBottom: 8 }}>שיבוצים חד-פעמיים</div>
                     {Object.entries(ad.__overrides || {}).sort().map(([date, shifts]) => (
                       <div key={date} style={{ background: COLORS.goldLight, borderRadius: 8, padding: "8px 11px", marginBottom: 5 }}>
                         <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 3 }}>{fmtDate(date)}</div>
@@ -2063,7 +2077,7 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
                           const st = data.staff.find((x) => x.id === s.staffId);
                           return (
                             <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                              <span style={{ fontSize: 12.5 }}>{st?.name || "?"}{s.start ? ` · ${s.start}–${s.end}` : ""}</span>
+                              <span style={{ fontSize: 12.5 }}><b>{st?.name || "?"}</b>{s.start ? ` · ${s.start}–${s.end}` : ""}</span>
                               <button type="button" onClick={() => removeOverride(date, idx)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.red }}><X size={12} /></button>
                             </div>
                           );
