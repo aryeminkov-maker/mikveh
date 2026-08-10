@@ -2222,7 +2222,9 @@ function AdminAttendance({ data, mikvehId }) {
   };
 
   // ─── Default shifts ────────────────────────────────────────────────────────
-  const defaultShifts = draft.__defaultShifts || (
+  if (draft === null) return <CenteredLoading text="טוענת שיבוצים…" />;
+
+  const defaultShifts = (draft.__defaultShifts) || (
     draft.__default ? [{ staffId: draft.__default, start: "", end: "" }] : []
   );
   const [defStaffId, setDefStaffId] = useState("");
@@ -2720,6 +2722,7 @@ function PublicApp({ mikvehs }) {
 }
 
 function scheduleShifts(defaultSchedule, weekday, dateStr) {
+  if (!defaultSchedule) return [];
   // 1. Check one-time overrides for this specific date
   if (dateStr) {
     const overrides = defaultSchedule.__overrides || {};
@@ -2815,6 +2818,7 @@ function LoadBadge({ load, inline }) {
 }
 
 function tonightStaff(data, weekday, today) {
+  if (!data || !data.defaultSchedule) return { shifts: [], names: [], isActual: false };
   const todayRec = data.checklist[today];
   const shiftClosed = !!(todayRec && todayRec.closed);
 
