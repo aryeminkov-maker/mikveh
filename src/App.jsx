@@ -1780,11 +1780,13 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
   // Attendance state — lives here, no separate component
   const [attendanceDraft, setAttendanceDraft] = useState(null);
   const attendanceDraftRef = React.useRef(null);
-  const setAttDraft = (val) => {
-    const next = typeof val === "function" ? val(attendanceDraftRef.current) : val;
-    attendanceDraftRef.current = next;
-    setAttDraft(next);
-  };
+  const setAttDraft = React.useCallback((valOrFn) => {
+    setAttendanceDraft((prev) => {
+      const next = typeof valOrFn === "function" ? valOrFn(prev) : valOrFn;
+      attendanceDraftRef.current = next;
+      return next;
+    });
+  }, []);
   const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [attendanceSaved, setAttendanceSaved] = useState(false);
   const [defStaffId, setDefStaffId] = useState("");
