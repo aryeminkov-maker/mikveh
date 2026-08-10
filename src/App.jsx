@@ -13,7 +13,7 @@ import {
   Thermometer, TrendingUp, Download, RefreshCw, Building2, ShieldCheck,
   Link2, Copy, Tablet, Smartphone, Settings, Trash2, KeyRound, Loader2, Navigation,
   Bell, Info, Bath, Timer, Gift, Clock3,
-  Image, ImagePlus, ArrowRight
+  Image, ImagePlus, ArrowRight, MessageSquare
 } from "lucide-react";
 
 /* ============================================================
@@ -135,7 +135,7 @@ const OPENING_HOURS = [
 ];
 
 const DEFAULT_MIKVEHS = [
-  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, bathRooms: 2, showerRooms: 1, price: "25", paymentUrl: "", manualLoad: null, hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
+  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, bathRooms: 2, showerRooms: 1, price: "25", paymentUrl: "", manualLoad: null, feedbackUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
 ];
 
 /* ============================================================
@@ -176,7 +176,7 @@ function useMikvehs() {
   const [list, setList] = useShared("mikvehs", DEFAULT_MIKVEHS);
 
   const addMikveh = useCallback((name, address) => {
-    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, bathRooms: 2, showerRooms: 1, price: "25", paymentUrl: "", manualLoad: null, hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
+    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, bathRooms: 2, showerRooms: 1, price: "25", paymentUrl: "", manualLoad: null, feedbackUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
   }, [setList]);
 
   const updateMikveh = useCallback((id, patch) => {
@@ -1084,160 +1084,141 @@ function KioskDippers({ data, staffName, flash, mikveh }) {
   const today = todayStr();
   const todayEntries = data.dippersLog.filter((e) => e.date === today);
   const activeEntries = todayEntries.filter((e) => !e.exitedAt);
-  const todayCount = todayEntries.length;
-  const todayCash = todayEntries.filter((e) => e.cash > 0).reduce((s, e) => s + (e.cash || 0), 0);
-  const todayCredit = todayEntries.filter((e) => e.credit > 0).reduce((s, e) => s + (e.credit || 0), 0);
-  const todayPrepaid = todayEntries.filter((e) => e.prepaid > 0).reduce((s, e) => s + (e.prepaid || 0), 0);
+  const todayCash = todayEntries.reduce((s, e) => s + (e.cash || 0), 0);
+  const todayCredit = todayEntries.reduce((s, e) => s + (e.credit || 0), 0);
+  const todayPrepaid = todayEntries.reduce((s, e) => s + (e.prepaid || 0), 0);
+  const pendingCount = todayEntries.filter((e) => e.status === "pending").length;
+  const exemptCount = todayEntries.filter((e) => e.status === "exempt").length;
 
-  // ── Add form ──────────────────────────────────────────────────────
   const [dur, setDur] = useState("");
-  const [customMin, setCustomMin] = useState("");
   const [pay, setPay] = useState("");
   const [payAmount, setPayAmount] = useState("25");
-  const [label, setLabel] = useState("");
   const [entryTime, setEntryTime] = useState(nowTime());
-  const [showForm, setShowForm] = useState(false);
   const [localLabels, setLocalLabels] = useState({});
   const updateLabel = (id, lbl) => setLocalLabels((prev) => ({ ...prev, [id]: lbl }));
 
-  const durObj = DURATION_OPTIONS.find((d) => d.id === dur);
   const canSubmit = dur && pay;
 
-  const resetForm = () => { setDur(""); setCustomMin(""); setPay(""); setPayAmount("25"); setLabel(""); setEntryTime(nowTime()); setShowForm(false); };
-
-  const submitVisit = () => {
-    if (!canSubmit) { flash("נא לבחור סוג טבילה ואופן תשלום"); return; }
-    const minutes = dur === "custom" ? (parseInt(customMin, 10) || 30) : (durObj?.minutes || 20);
+  const submit = () => {
+    if (!canSubmit) return;
+    const durObj = DURATION_OPTIONS.find((d) => d.id === dur);
     const amount = parseFloat(payAmount) || 0;
     const entry = {
-      id: uid(), date: today, time: entryTime, staffName, count: 1, duration: dur, minutes,
+      id: uid(), date: today, time: entryTime, staffName, count: 1, duration: dur,
+      minutes: durObj?.minutes || 20,
       status: pay.startsWith("paid") ? "paid" : pay,
       cash: pay === "paid-cash" ? amount : 0,
       credit: pay === "paid-credit" ? amount : 0,
       prepaid: pay === "paid-prepaid" ? amount : 0,
-      tempLabel: label.trim() || "",
+      tempLabel: "",
     };
     data.setDippersLog((prev) => [entry, ...prev]);
-    data.addAudit(staffName, "רישום טובלת", `${durObj?.label || dur} · ${payStatusLabel(entry)} · ${entryTime}`);
+    data.addAudit(staffName, "רישום טובלת", `${durObj?.label || dur} · ${payStatusLabel(entry)}`);
     flash("נרשם ✓");
-    resetForm();
+    setDur(""); setPay(""); setPayAmount("25"); setEntryTime(nowTime());
   };
 
-  // Load estimate for current shift
-  const load = mikveh ? estimateLoad(data.dippersLog, mikveh, today, mikveh.manualLoad) : null;
+  const DUR_BTNS = [
+    { id: "dip",   label: "רק טבילה",       sub: "~20′", minutes: 20 },
+    { id: "prep",  label: "גם התארגנות",   sub: "~60′", minutes: 60 },
+    { id: "bride", label: "כלה",             sub: "~120′", minutes: 120 },
+  ];
+  const PAY_BTNS = [
+    { id: "paid-cash",    label: "מזומן",         color: COLORS.teal },
+    { id: "paid-credit",  label: "אשראי",          color: COLORS.teal },
+    { id: "paid-prepaid", label: "מראש",            color: COLORS.teal },
+    { id: "pending",      label: "תשלם בהמשך",    color: COLORS.gold },
+    { id: "exempt",       label: "כלה — פטורה",   color: "#7c3aed" },
+  ];
 
   return (
     <>
-      {/* ── Load status bar ─────────────────────────────────────────── */}
-      {load && (
-        <div style={{ marginBottom: 14 }}>
-          <LoadBadge load={load} mikveh={mikveh} onManualChange={mikveh ? (v) => {} : null} showETA />
-          {mikveh && (
-            <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-              {["green", "orange", "red", null].map((level) => {
-                const active = (mikveh.manualLoad || null) === level;
-                const cfg = { green: { label: "ירוק — פנוי", c: "#22c55e", bg: "#dcfce7" }, orange: { label: "כתום — עמוס", c: "#f97316", bg: "#ffedd5" }, red: { label: "אדום — מלא", c: "#ef4444", bg: "#fee2e2" }, null: { label: "אוטומטי", c: COLORS.teal, bg: COLORS.aquaLight } };
-                const { label: lbl, c, bg } = cfg[String(level)] || cfg["null"];
-                return (
-                  <button key={String(level)} onClick={() => { if (mikveh && mikveh.onManualLoad) mikveh.onManualLoad(level); }}
-                    style={{ fontSize: 12, padding: "5px 11px", borderRadius: 9, border: `1.5px solid ${active ? c : "#00000018"}`, background: active ? bg : "#fff", color: active ? c : "#555", fontWeight: active ? 700 : 500, cursor: "pointer" }}>
-                    {lbl}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Add dipper card ─────────────────────────────────────────── */}
-      <div style={{ background: COLORS.paper, borderRadius: 16, padding: 18, marginBottom: 14, border: `1px solid ${COLORS.aqua}22` }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: showForm ? 16 : 0 }}>
-          <span style={{ fontWeight: 700, fontSize: 16 }}>טובלת חדשה</span>
-          {!showForm && <button style={{ ...btnPrimary, fontSize: 15, padding: "12px 22px" }} onClick={() => { setEntryTime(nowTime()); setShowForm(true); }}>
-            <Plus size={18} /> הוספת טובלת
-          </button>}
+      {/* ── Add form ── */}
+      <div style={{ background: COLORS.paper, borderRadius: 18, padding: "18px 16px", marginBottom: 14, border: `1px solid ${COLORS.aqua}22` }}>
+        {/* Entry time — small, unobtrusive */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 14, fontSize: 13, color: "#7a8f8d" }}>
+          <span>שעת כניסה</span>
+          <input type="time" value={entryTime} onChange={(e) => setEntryTime(e.target.value)}
+            style={{ border: "none", background: COLORS.seafoam, borderRadius: 8, padding: "4px 10px", fontSize: 13, color: COLORS.ink, fontWeight: 600 }} />
         </div>
 
-        {showForm && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ maxWidth: 160 }}>
-              <Field label="שעת כניסה">
-                <input type="time" style={inputStyle} value={entryTime} onChange={(e) => setEntryTime(e.target.value)} />
-              </Field>
-            </div>
-
-            <Field label="סוג טבילה — חובה">
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
-                {DURATION_OPTIONS.map((d) => (
-                  <button key={d.id} onClick={() => setDur(d.id)} style={{
-                    ...btnBase(dur === d.id ? COLORS.teal : "#fff", dur === d.id ? "#fff" : COLORS.ink),
-                    fontSize: 14, padding: "12px 16px", border: `1.5px solid ${dur === d.id ? COLORS.teal : "#00000018"}`, flex: "1 1 auto",
-                  }}>
-                    {d.label}{d.minutes && <span style={{ opacity: 0.65, fontSize: 12 }}> ~{d.minutes}′</span>}
-                  </button>
-                ))}
-              </div>
-            </Field>
-            {dur === "custom" && (
-              <div style={{ maxWidth: 160 }}>
-                <Field label="זמן משוער (דקות)"><input type="number" min="5" style={inputStyle} value={customMin} onChange={(e) => setCustomMin(e.target.value)} /></Field>
-              </div>
-            )}
-
-            <Field label="אופן תשלום — חובה">
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
-                {PAYMENT_STATUS.map((p) => (
-                  <button key={p.id} onClick={() => setPay(p.id)} style={{
-                    ...btnBase(pay === p.id ? p.color : "#fff", pay === p.id ? "#fff" : COLORS.ink),
-                    fontSize: 14, padding: "12px 14px", border: `1.5px solid ${pay === p.id ? p.color : "#00000018"}`, flex: "1 1 auto",
-                  }}>{p.label}</button>
-                ))}
-              </div>
-            </Field>
-            {pay && pay.startsWith("paid") && (
-              <div style={{ maxWidth: 160 }}>
-                <Field label="סכום (₪)"><input type="number" min="0" style={inputStyle} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} inputMode="decimal" /></Field>
-              </div>
-            )}
-            {pay === "pending" && (
-              <Field label="כינוי זמני (לא נשמר)">
-                <input style={inputStyle} value={label} onChange={(e) => setLabel(e.target.value)} placeholder='לדוגמה: "מעיל אדום"' />
-              </Field>
-            )}
-
-            <div style={{ display: "flex", gap: 10 }}>
-              <button style={{ ...btnPrimary, flex: 1, justifyContent: "center", fontSize: 15, padding: "13px 0", opacity: canSubmit ? 1 : 0.45 }} onClick={submitVisit} disabled={!canSubmit}>
-                <Check size={17} /> רישום טובלת
+        {/* Duration buttons */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
+          {DUR_BTNS.map((d) => {
+            const active = dur === d.id;
+            return (
+              <button key={d.id} onClick={() => setDur(d.id)} style={{
+                padding: "16px 8px", borderRadius: 14, border: `2px solid ${active ? COLORS.teal : "#e0e8ec"}`,
+                background: active ? COLORS.teal : "#fff", color: active ? "#fff" : COLORS.ink,
+                fontWeight: 700, fontSize: 15, cursor: "pointer", lineHeight: 1.3, textAlign: "center",
+              }}>
+                {d.label}
+                <div style={{ fontSize: 11, fontWeight: 500, opacity: 0.7, marginTop: 2 }}>{d.sub}</div>
               </button>
-              <button style={{ ...btnGhost, padding: "13px 16px" }} onClick={resetForm}>ביטול</button>
-            </div>
+            );
+          })}
+        </div>
+
+        {/* Payment buttons */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
+          {PAY_BTNS.map((p) => {
+            const active = pay === p.id;
+            return (
+              <button key={p.id} onClick={() => setPay(p.id)} style={{
+                padding: "14px 4px", borderRadius: 14, border: `2px solid ${active ? p.color : "#e0e8ec"}`,
+                background: active ? p.color : "#fff", color: active ? "#fff" : COLORS.ink,
+                fontWeight: 700, fontSize: 13.5, cursor: "pointer", lineHeight: 1.3, textAlign: "center",
+              }}>
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Amount — only when payment chosen and not pending/exempt */}
+        {pay && pay.startsWith("paid") && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <span style={{ fontSize: 13.5, color: "#7a8f8d" }}>סכום ₪</span>
+            <input type="number" min="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)}
+              inputMode="decimal" style={{ width: 100, border: "2px solid #e0e8ec", borderRadius: 10, padding: "8px 12px", fontSize: 16, fontWeight: 700, textAlign: "center" }} />
           </div>
         )}
+
+        {/* Submit */}
+        <button onClick={submit} disabled={!canSubmit} style={{
+          width: "100%", padding: "16px 0", borderRadius: 14, border: "none",
+          background: canSubmit ? COLORS.teal : "#e0e8ec", color: canSubmit ? "#fff" : "#aaa",
+          fontWeight: 800, fontSize: 17, cursor: canSubmit ? "pointer" : "default",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          transition: "background .15s",
+        }}>
+          <Plus size={20} /> רישום טובלת
+        </button>
       </div>
 
-      {/* ── Shift dipper list ────────────────────────────────────────── */}
+      {/* ── Dipper list ── */}
       {todayEntries.length > 0 && (
-        <div style={{ background: COLORS.paper, borderRadius: 16, padding: 18, border: `1px solid ${COLORS.aqua}22` }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-            <span style={{ fontWeight: 700, fontSize: 16 }}>טובלות במשמרת ({todayCount})</span>
-            <div style={{ fontSize: 12, color: COLORS.teal, textAlign: "left" }}>
-              {todayCash > 0 && <span style={{ marginLeft: 8 }}>מזומן: <b>{fmtILS(todayCash)}</b></span>}
-              {todayCredit > 0 && <span style={{ marginLeft: 8 }}>אשראי: <b>{fmtILS(todayCredit)}</b></span>}
-              {todayPrepaid > 0 && <span style={{ marginLeft: 8 }}>מראש: <b>{fmtILS(todayPrepaid)}</b></span>}
+        <div style={{ background: COLORS.paper, borderRadius: 16, padding: 16, border: `1px solid ${COLORS.aqua}22` }}>
+          {/* Summary strip */}
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 12, paddingBottom: 12, borderBottom: `1px solid ${COLORS.aqua}22` }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 24, fontWeight: 900, color: COLORS.teal, lineHeight: 1 }}>{todayEntries.length}</div>
+              <div style={{ fontSize: 11, color: "#7a8f8d" }}>טובלות</div>
             </div>
-          </div>
-          {/* Summary numbers */}
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 14, paddingBottom: 14, borderBottom: `1px solid ${COLORS.aqua}22` }}>
-            <div style={{ textAlign: "center" }}><div style={{ fontSize: 22, fontWeight: 800, color: COLORS.teal }}>{todayCount}</div><div style={{ fontSize: 10.5, color: "#7a8f8d" }}>טובלות</div></div>
-            {(todayCash + todayCredit + todayPrepaid) > 0 && <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800, color: COLORS.teal }}>{fmtILS(todayCash + todayCredit + todayPrepaid)}</div><div style={{ fontSize: 10.5, color: "#7a8f8d" }}>שולם</div></div>}
-            {todayEntries.filter((e) => e.status === "pending").length > 0 && <div style={{ textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: COLORS.red }}>{todayEntries.filter((e) => e.status === "pending").length}</div><div style={{ fontSize: 10.5, color: "#7a8f8d" }}>ממתינות לתשלום</div></div>}
-            {todayEntries.filter((e) => e.status === "exempt").length > 0 && <div style={{ textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: COLORS.aqua }}>{todayEntries.filter((e) => e.status === "exempt").length}</div><div style={{ fontSize: 10.5, color: "#7a8f8d" }}>פטורות</div></div>}
-            {activeEntries.length > 0 && <div style={{ textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: COLORS.gold }}>{activeEntries.length}</div><div style={{ fontSize: 10.5, color: "#7a8f8d" }}>עדיין בפנים</div></div>}
+            {(todayCash + todayCredit + todayPrepaid) > 0 && (
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 800, color: COLORS.teal, lineHeight: 1 }}>{fmtILS(todayCash + todayCredit + todayPrepaid)}</div>
+                <div style={{ fontSize: 11, color: "#7a8f8d" }}>שולם</div>
+              </div>
+            )}
+            {pendingCount > 0 && <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800, color: COLORS.red, lineHeight: 1 }}>{pendingCount}</div><div style={{ fontSize: 11, color: "#7a8f8d" }}>ממתינות</div></div>}
+            {exemptCount > 0 && <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800, color: "#7c3aed", lineHeight: 1 }}>{exemptCount}</div><div style={{ fontSize: 11, color: "#7a8f8d" }}>פטורות</div></div>}
+            {activeEntries.length > 0 && <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800, color: COLORS.gold, lineHeight: 1 }}>{activeEntries.length}</div><div style={{ fontSize: 11, color: "#7a8f8d" }}>בפנים</div></div>}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {todayEntries.map((e) => (
-              <DipperRow key={e.id} entry={e} data={data} staffName={staffName} flash={flash} localLabel={localLabels[e.id]} onSetLabel={updateLabel} />
+              <DipperRow key={e.id} entry={e} data={data} staffName={staffName} flash={flash}
+                localLabel={localLabels[e.id]} onSetLabel={updateLabel} />
             ))}
           </div>
         </div>
@@ -1256,15 +1237,15 @@ function DipperRow({ entry, data, staffName, flash, localLabel, onSetLabel }) {
     : entry.prepaid > 0 ? "paid-prepaid"
     : "paid-cash"
   );
-  const [payAmount, setPayAmount] = useState(String(entry.cash || entry.credit || entry.prepaid || ""));
+  const [payAmount, setPayAmount] = useState(String(entry.cash || entry.credit || entry.prepaid || "25"));
   const [dur, setDur] = useState(entry.duration || "dip");
   const [labelInput, setLabelInput] = useState(localLabel || entry.tempLabel || "");
   const [entryTime, setEntryTime] = useState(entry.time || "");
 
   const durLabel = DURATION_OPTIONS.find((d) => d.id === dur)?.label || dur;
   const isExited = !!entry.exitedAt;
-  const statusColor = entry.status === "pending" ? COLORS.gold : entry.status === "exempt" ? COLORS.aqua : COLORS.teal;
-  const displayLabel = localLabel || entry.tempLabel || "";
+  const statusColor = entry.status === "pending" ? COLORS.gold
+    : entry.status === "exempt" ? "#7c3aed" : COLORS.teal;
 
   const save = () => {
     const amount = parseFloat(payAmount) || 0;
@@ -1287,59 +1268,65 @@ function DipperRow({ entry, data, staffName, flash, localLabel, onSetLabel }) {
     flash("סומנה כיצאה ✓");
   };
 
-  const unmarkExited = () => {
-    data.setDippersLog((prev) => prev.map((e) => e.id === entry.id ? { ...e, exitedAt: null } : e));
-  };
+  const PAY_BTNS = [
+    { id: "paid-cash", label: "מזומן", color: COLORS.teal },
+    { id: "paid-credit", label: "אשראי", color: COLORS.teal },
+    { id: "paid-prepaid", label: "מראש", color: COLORS.teal },
+    { id: "pending", label: "תשלם בהמשך", color: COLORS.gold },
+    { id: "exempt", label: "כלה — פטורה", color: "#7c3aed" },
+  ];
 
   return (
-    <div style={{ background: isExited ? "#f8f8f8" : COLORS.paper, borderRadius: 12, border: `1px solid ${isExited ? "#ddd" : statusColor + "44"}`, padding: "11px 14px", opacity: isExited ? 0.7 : 1 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-        <div>
-          <span style={{ fontWeight: 700, fontSize: 14 }}>{entry.time || "—"}</span>
-          <span style={{ fontSize: 13, color: "#7a8f8d", marginRight: 8 }}>· {durLabel}</span>
-          {displayLabel && <span style={{ fontSize: 12, color: COLORS.gold, fontWeight: 600 }}>· {displayLabel}</span>}
-          {isExited && <span style={{ fontSize: 11, color: "#aaa", marginRight: 6 }}>(יצאה {fmtDateTime(entry.exitedAt).split(" ")[1]})</span>}
+    <div style={{ borderRadius: 12, border: `1.5px solid ${isExited ? "#ddd" : statusColor + "44"}`,
+      padding: "10px 12px", background: isExited ? "#f8f8f8" : "#fff", opacity: isExited ? 0.75 : 1 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontWeight: 800, fontSize: 15, color: COLORS.ink }}>{entry.time || "—"}</span>
+          <span style={{ fontSize: 13, color: "#7a8f8d" }}>{durLabel}</span>
+          {(localLabel || entry.tempLabel) && <span style={{ fontSize: 12, color: COLORS.gold }}>· {localLabel || entry.tempLabel}</span>}
+          {isExited && <span style={{ fontSize: 11, color: "#aaa" }}>יצאה</span>}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: statusColor }}>{payStatusLabel(entry)}</span>
-          {!isExited && <button onClick={markExited} style={{ ...btnGhost, padding: "5px 10px", fontSize: 12, color: COLORS.teal }}>✓ יצאה</button>}
-          {isExited && <button onClick={unmarkExited} style={{ ...btnGhost, padding: "5px 10px", fontSize: 11, color: "#aaa" }}>בטל</button>}
-          <button onClick={() => setEditing((x) => !x)} style={{ ...btnGhost, padding: "5px 10px", fontSize: 12 }}>{editing ? "סגירה" : "עריכה"}</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: statusColor }}>{payStatusLabel(entry)}</span>
+          {!isExited
+            ? <button onClick={markExited} style={{ background: COLORS.aquaLight, border: "none", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: COLORS.teal, cursor: "pointer" }}>✓ יצאה</button>
+            : <button onClick={() => data.setDippersLog((prev) => prev.map((e) => e.id === entry.id ? { ...e, exitedAt: null } : e))} style={{ background: "#f0f0f0", border: "none", borderRadius: 8, padding: "4px 8px", fontSize: 11, color: "#aaa", cursor: "pointer" }}>בטל</button>
+          }
+          <button onClick={() => setEditing((x) => !x)} style={{ background: "#f4f8fa", border: "none", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: COLORS.ink }}>
+            {editing ? "סגור" : "עריכה"}
+          </button>
         </div>
       </div>
       {editing && (
-        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ maxWidth: 140 }}>
-            <Field label="שעת כניסה"><input type="time" style={inputStyle} value={entryTime} onChange={(e) => setEntryTime(e.target.value)} /></Field>
+        <div style={{ marginTop: 12, borderTop: "1px solid #f0f0f0", paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", align: "center", gap: 8 }}>
+            <span style={{ fontSize: 13, color: "#7a8f8d" }}>שעת כניסה</span>
+            <input type="time" style={{ border: "2px solid #e0e8ec", borderRadius: 8, padding: "4px 8px", fontSize: 13 }} value={entryTime} onChange={(e) => setEntryTime(e.target.value)} />
           </div>
-          <Field label="סוג טבילה">
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {DURATION_OPTIONS.filter((d) => d.id !== "custom").map((d) => (
-                <button key={d.id} onClick={() => setDur(d.id)} style={{ ...btnBase(dur === d.id ? COLORS.teal : "#fff", dur === d.id ? "#fff" : COLORS.ink), fontSize: 13, padding: "8px 11px", border: `1px solid ${dur === d.id ? COLORS.teal : "#00000018"}` }}>{d.label}</button>
-              ))}
-            </div>
-          </Field>
-          <Field label="תשלום">
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {PAYMENT_STATUS.map((p) => (
-                <button key={p.id} onClick={() => setPay(p.id)} style={{ ...btnBase(pay === p.id ? p.color : "#fff", pay === p.id ? "#fff" : COLORS.ink), fontSize: 13, padding: "8px 11px", border: `1px solid ${pay === p.id ? p.color : "#00000018"}` }}>{p.label}</button>
-              ))}
-            </div>
-          </Field>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {DURATION_OPTIONS.filter((d) => d.id !== "custom").map((d) => (
+              <button key={d.id} onClick={() => setDur(d.id)} style={{ padding: "8px 12px", borderRadius: 10, border: `2px solid ${dur === d.id ? COLORS.teal : "#e0e8ec"}`, background: dur === d.id ? COLORS.teal : "#fff", color: dur === d.id ? "#fff" : COLORS.ink, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{d.label}</button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {PAY_BTNS.map((p) => (
+              <button key={p.id} onClick={() => setPay(p.id)} style={{ padding: "8px 12px", borderRadius: 10, border: `2px solid ${pay === p.id ? p.color : "#e0e8ec"}`, background: pay === p.id ? p.color : "#fff", color: pay === p.id ? "#fff" : COLORS.ink, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>{p.label}</button>
+            ))}
+          </div>
           {pay && pay.startsWith("paid") && (
-            <div style={{ maxWidth: 150 }}>
-              <Field label="סכום (₪)"><input type="number" style={inputStyle} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} inputMode="decimal" /></Field>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, color: "#7a8f8d" }}>סכום ₪</span>
+              <input type="number" style={{ width: 90, border: "2px solid #e0e8ec", borderRadius: 8, padding: "6px 10px", fontSize: 14, fontWeight: 700 }} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} inputMode="decimal" />
             </div>
           )}
-          <Field label="שם / כינוי זמני (לא נשמר)">
-            <input style={inputStyle} value={labelInput} onChange={(e) => setLabelInput(e.target.value)} placeholder='לדוגמה: "שרה מצדדית"' />
+          <Field label="כינוי זמני (לא נשמר)">
+            <input style={inputStyle} value={labelInput} onChange={(e) => setLabelInput(e.target.value)} placeholder='לדוגמה: "שרה"' />
           </Field>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8 }}>
             <button style={btnPrimary} onClick={save}><Check size={14} /> שמירה</button>
             <button style={{ ...btnGhost, color: COLORS.red, borderColor: COLORS.red + "55" }}
-              onClick={() => { if (window.confirm("למחוק רשומה זו?")) { data.setDippersLog((prev) => prev.filter((e) => e.id !== entry.id)); data.addAudit(staffName, "מחיקת רשומת טובלת", `שעה ${entry.time}`); flash("נמחק ✓"); } }}>
-              <Trash2 size={14} /> מחיקה
-            </button>
+              onClick={() => { if (window.confirm("למחוק?")) { data.setDippersLog((prev) => prev.filter((e) => e.id !== entry.id)); flash("נמחק ✓"); } }}>
+              <Trash2 size={14} /></button>
           </div>
         </div>
       )}
@@ -1751,8 +1738,8 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
 
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
 
-  const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, bathRooms: mikveh.bathRooms ?? 2, showerRooms: mikveh.showerRooms ?? 1, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "" });
-  useEffect(() => { setForm({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, bathRooms: mikveh.bathRooms ?? 2, showerRooms: mikveh.showerRooms ?? 1, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "" }); }, [mikveh.id]);
+  const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, bathRooms: mikveh.bathRooms ?? 2, showerRooms: mikveh.showerRooms ?? 1, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "", feedbackUrl: mikveh.feedbackUrl || "" });
+  useEffect(() => { setForm({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, bathRooms: mikveh.bathRooms ?? 2, showerRooms: mikveh.showerRooms ?? 1, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "", feedbackUrl: mikveh.feedbackUrl || "" }); }, [mikveh.id]);
   const saveForm = () => mikvehsCtl.updateMikveh(mikveh.id, { ...form, photoUrl: toDirectImageUrl(form.photoUrl) });
 
   const [newPhotoUrl, setNewPhotoUrl] = useState("");
@@ -1845,6 +1832,9 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
             </div>
             <Field label="קישור לתשלום מקוון (ייפתח כשהתושבת תלחץ 'לתשלום')">
               <input style={inputStyle} value={form.paymentUrl} onChange={(e) => setForm({ ...form, paymentUrl: e.target.value })} placeholder="https://..." />
+            </Field>
+            <Field label="קישור לטופס משוב (ייפתח כשהתושבת תלחץ 'משוב')">
+              <input style={inputStyle} value={form.feedbackUrl} onChange={(e) => setForm({ ...form, feedbackUrl: e.target.value })} placeholder="https://forms.google.com/..." />
             </Field>
             <Field label="הערות נוספות (יוצגו לתושבות בממשק הציבורי, בתוך 'עוד פרטים')">
               <textarea style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
@@ -1971,7 +1961,7 @@ function AttendanceInline({ data, mikvehId }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{ borderTop: `1px solid ${COLORS.aqua}22`, paddingTop: 16 }}>
-      <button onClick={() => setOpen((x) => !x)} style={{
+      <button onClick={(e) => { e.stopPropagation(); setOpen((x) => !x); }} style={{
         display: "flex", alignItems: "center", gap: 8, background: "none", border: "none",
         cursor: "pointer", fontWeight: 700, fontSize: 14.5, color: COLORS.teal, padding: 0,
       }}>
@@ -2901,6 +2891,11 @@ function PublicMikvehDetail({ mikveh }) {
             {mikveh.paymentUrl && (
               <a href={mikveh.paymentUrl} target="_blank" rel="noreferrer" style={{ ...btnBase("#ffffff22", "#fff"), textDecoration: "none" }}>
                 <Wallet size={15} /> לתשלום מקוון
+              </a>
+            )}
+            {mikveh.feedbackUrl && (
+              <a href={mikveh.feedbackUrl} target="_blank" rel="noreferrer" style={{ ...btnBase("#ffffff22", "#fff"), textDecoration: "none" }}>
+                <MessageSquare size={15} /> משוב
               </a>
             )}
             <button onClick={() => setExpanded((x) => !x)} style={{ ...btnBase("#ffffff22", "#fff") }}>
