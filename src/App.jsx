@@ -803,6 +803,25 @@ function Card({ title, icon: Icon, children, right }) {
   );
 }
 
+function KioskModal({ children, onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#00000066", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, padding: 28, maxWidth: 420, width: "100%", textAlign: "center", boxShadow: "0 8px 40px #0004" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value, bold, warn }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "6px 0", borderBottom: "1px solid #f0f0f0" }}>
+      <span style={{ color: "#7a8f8d" }}>{label}</span>
+      <span style={{ fontWeight: bold ? 800 : 600, color: warn ? COLORS.red : COLORS.ink }}>{value}</span>
+    </div>
+  );
+}
+
 function KioskLogin({ staff, onLogin, mikveh, onLeaveDevice }) {
   const [selected, setSelected] = useState(null);
   const [pin, setPin] = useState("");
@@ -1068,11 +1087,11 @@ const PAYMENT_STATUS = [
   { id: "paid-credit", label: "אשראי", color: COLORS.teal },
   { id: "paid-prepaid", label: "שולם מראש", color: COLORS.teal },
   { id: "pending", label: "תשלם בהמשך", color: COLORS.gold },
-  { id: "exempt", label: "כלה — פטורה", color: COLORS.aqua },
+  { id: "exempt", label: "כלה בשנה הראשונה", color: COLORS.aqua },
 ];
 
 function payStatusLabel(entry) {
-  if (entry.status === "exempt") return "כלה — פטורה";
+  if (entry.status === "exempt") return "כלה בשנה הראשונה";
   if (entry.status === "pending") return "ממתינה לתשלום";
   if (entry.cash > 0) return `מזומן ${fmtILS(entry.cash)}`;
   if (entry.credit > 0) return `אשראי ${fmtILS(entry.credit)}`;
@@ -1128,7 +1147,7 @@ function KioskDippers({ data, staffName, flash, mikveh }) {
     { id: "paid-credit",  label: "אשראי",          color: COLORS.teal },
     { id: "paid-prepaid", label: "מראש",            color: COLORS.teal },
     { id: "pending",      label: "תשלם בהמשך",    color: COLORS.gold },
-    { id: "exempt",       label: "כלה — פטורה",   color: "#7c3aed" },
+    { id: "exempt",       label: "כלה בשנה הראשונה",   color: "#7c3aed" },
   ];
 
   return (
@@ -1273,7 +1292,7 @@ function DipperRow({ entry, data, staffName, flash, localLabel, onSetLabel }) {
     { id: "paid-credit", label: "אשראי", color: COLORS.teal },
     { id: "paid-prepaid", label: "מראש", color: COLORS.teal },
     { id: "pending", label: "תשלם בהמשך", color: COLORS.gold },
-    { id: "exempt", label: "כלה — פטורה", color: "#7c3aed" },
+    { id: "exempt", label: "כלה בשנה הראשונה", color: "#7c3aed" },
   ];
 
   return (
