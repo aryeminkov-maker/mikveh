@@ -1795,7 +1795,7 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
 
   return (
     <div style={{ background: COLORS.paper, borderRadius: 15, border: `1px solid ${COLORS.aqua}22`, overflow: "hidden" }}>
-      <button onClick={() => setExpanded((x) => !x)} style={{
+      <div onClick={() => setExpanded((x) => !x)} style={{
         width: "100%", textAlign: "right", background: "none", border: "none", cursor: "pointer", padding: 16,
         display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap",
       }}>
@@ -1836,7 +1836,7 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
           </a>
           <ChevronRight size={17} style={{ transform: expanded ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform .15s", color: COLORS.teal }} />
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div style={{ borderTop: `1px solid ${COLORS.aqua}22`, padding: 18, display: "flex", flexDirection: "column", gap: 20 }}>
