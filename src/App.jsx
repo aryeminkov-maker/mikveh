@@ -1224,13 +1224,17 @@ function payStatusLabel(entry) {
 
 function KioskDippers({ data, staffName, flash, mikveh }) {
   const today = todayStr();
-  const todayEntries = data.dippersLog.filter((e) => e.date === today);
-  const activeEntries = todayEntries.filter((e) => !e.exitedAt);
-  const todayCash = todayEntries.reduce((s, e) => s + (e.cash || 0), 0);
-  const todayCredit = todayEntries.reduce((s, e) => s + (e.credit || 0), 0);
-  const todayPrepaid = todayEntries.reduce((s, e) => s + (e.prepaid || 0), 0);
-  const pendingCount = todayEntries.filter((e) => e.status === "pending").length;
-  const exemptCount = todayEntries.filter((e) => e.status === "exempt").length;
+  const [lateMode, setLateMode] = useState(false);
+  const [lateDate, setLateDate] = useState(today);
+  const activeDate = lateMode ? lateDate : today;
+
+  const activeDateEntries = data.dippersLog.filter((e) => e.date === activeDate);
+  const activeEntries = activeDateEntries.filter((e) => !e.exitedAt);
+  const activeCash = activeDateEntries.reduce((s, e) => s + (e.cash || 0), 0);
+  const activeCredit = activeDateEntries.reduce((s, e) => s + (e.credit || 0), 0);
+  const activePrepaid = activeDateEntries.reduce((s, e) => s + (e.prepaid || 0), 0);
+  const pendingCount = activeDateEntries.filter((e) => e.status === "pending").length;
+  const exemptCount = activeDateEntries.filter((e) => e.status === "exempt").length;
 
   const [dur, setDur] = useState("");
   const [pay, setPay] = useState("");
@@ -1239,24 +1243,26 @@ function KioskDippers({ data, staffName, flash, mikveh }) {
   const [localLabels, setLocalLabels] = useState({});
   const updateLabel = (id, lbl) => setLocalLabels((prev) => ({ ...prev, [id]: lbl }));
 
-  const canSubmit = dur && pay;
+  const canSubmit = dur && pay && (!lateMode || lateDate);
 
   const submit = () => {
     if (!canSubmit) return;
     const durObj = DURATION_OPTIONS.find((d) => d.id === dur);
     const amount = parseFloat(payAmount) || 0;
     const entry = {
-      id: uid(), date: today, time: entryTime, staffName, count: 1, duration: dur,
+      id: uid(), date: activeDate, time: entryTime, staffName, count: 1, duration: dur,
       minutes: durObj?.minutes || 20,
       status: pay.startsWith("paid") ? "paid" : pay,
       cash: pay === "paid-cash" ? amount : 0,
       credit: pay === "paid-credit" ? amount : 0,
       prepaid: pay === "paid-prepaid" ? amount : 0,
       tempLabel: "",
+      ...(lateMode ? { lateReport: true, reportedAt: new Date().toISOString() } : {}),
     };
     data.setDippersLog((prev) => [entry, ...prev]);
-    data.addAudit(staffName, "רישום טובלת", `${durObj?.label || dur} · ${payStatusLabel(entry)}`);
-    flash("נרשם ✓");
+    data.addAudit(staffName, lateMode ? "רישום טובלת (דיווח מאוחר)" : "רישום טובלת",
+      `${fmtDate(activeDate)} · ${durObj?.label || dur} · ${payStatusLabel(entry)}`);
+    flash(lateMode ? "נרשם כדיווח מאוחר ✓" : "נרשם ✓");
     setDur(""); setPay(""); setPayAmount("25"); setEntryTime(nowTime());
   };
 
@@ -1275,6 +1281,22 @@ function KioskDippers({ data, staffName, flash, mikveh }) {
 
   return (
     <>
+      {/* ── Late-report / catch-up toggle ── */}
+      <div style={{ background: lateMode ? COLORS.goldLight : COLORS.paper, borderRadius: 14, padding: "10px 14px", marginBottom: 12, border: `1.5px solid ${lateMode ? COLORS.gold + "77" : COLORS.aqua + "22"}` }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13.5, fontWeight: 700, color: lateMode ? COLORS.gold : COLORS.ink }}>
+          <input type="checkbox" checked={lateMode} onChange={(e) => { setLateMode(e.target.checked); if (!e.target.checked) setLateDate(today); }} />
+          <Clock3 size={15} /> דיווח מאוחר / השלמות (עבור יום שכבר עבר)
+        </label>
+        {lateMode && (
+          <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12.5, color: "#7a8f8d" }}>עבור תאריך:</span>
+            <input type="date" max={today} value={lateDate} onChange={(e) => setLateDate(e.target.value)}
+              style={{ border: "1.5px solid " + COLORS.gold + "55", borderRadius: 8, padding: "5px 10px", fontSize: 13, fontWeight: 700 }} />
+            <span style={{ fontSize: 11.5, color: "#7a8f8d" }}>כל טובלת שתירשמי כעת תסומן כדיווח מאוחר ותשויך לתאריך הזה.</span>
+          </div>
+        )}
+      </div>
+
       {/* ── Add form ── */}
       <div style={{ background: COLORS.paper, borderRadius: 18, padding: "16px", marginBottom: 14, border: `1px solid ${COLORS.aqua}22` }}>
 
@@ -1342,27 +1364,28 @@ function KioskDippers({ data, staffName, flash, mikveh }) {
         {/* Submit */}
         <button onClick={submit} disabled={!canSubmit} style={{
           width: "100%", padding: "16px 0", borderRadius: 14, border: "none",
-          background: canSubmit ? COLORS.teal : "#e0e8ec", color: canSubmit ? "#fff" : "#aaa",
+          background: canSubmit ? (lateMode ? COLORS.gold : COLORS.teal) : "#e0e8ec", color: canSubmit ? "#fff" : "#aaa",
           fontWeight: 800, fontSize: 17, cursor: canSubmit ? "pointer" : "default",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
           transition: "background .15s",
         }}>
-          <Plus size={20} /> רישום טובלת
+          <Plus size={20} /> {lateMode ? `רישום טובלת · ${fmtDate(lateDate)}` : "רישום טובלת"}
         </button>
       </div>
 
       {/* ── Dipper list ── */}
-      {todayEntries.length > 0 && (
+      {activeDateEntries.length > 0 && (
         <div style={{ background: COLORS.paper, borderRadius: 16, padding: 16, border: `1px solid ${COLORS.aqua}22` }}>
+          {lateMode && <p style={{ margin: "0 0 10px", fontSize: 12.5, fontWeight: 700, color: COLORS.gold }}>מציגה רשומות עבור {fmtDate(lateDate)}</p>}
           {/* Summary strip */}
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 12, paddingBottom: 12, borderBottom: `1px solid ${COLORS.aqua}22` }}>
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 24, fontWeight: 900, color: COLORS.teal, lineHeight: 1 }}>{todayEntries.length}</div>
+              <div style={{ fontSize: 24, fontWeight: 900, color: COLORS.teal, lineHeight: 1 }}>{activeDateEntries.length}</div>
               <div style={{ fontSize: 11, color: "#7a8f8d" }}>טובלות</div>
             </div>
-            {(todayCash + todayCredit + todayPrepaid) > 0 && (
+            {(activeCash + activeCredit + activePrepaid) > 0 && (
               <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 20, fontWeight: 800, color: COLORS.teal, lineHeight: 1 }}>{fmtILS(todayCash + todayCredit + todayPrepaid)}</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: COLORS.teal, lineHeight: 1 }}>{fmtILS(activeCash + activeCredit + activePrepaid)}</div>
                 <div style={{ fontSize: 11, color: "#7a8f8d" }}>שולם</div>
               </div>
             )}
@@ -1371,7 +1394,7 @@ function KioskDippers({ data, staffName, flash, mikveh }) {
             {activeEntries.length > 0 && <div style={{ textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800, color: COLORS.gold, lineHeight: 1 }}>{activeEntries.length}</div><div style={{ fontSize: 11, color: "#7a8f8d" }}>בפנים</div></div>}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {todayEntries.map((e) => (
+            {activeDateEntries.map((e) => (
               <DipperRow key={e.id} entry={e} data={data} staffName={staffName} flash={flash}
                 localLabel={localLabels[e.id]} onSetLabel={updateLabel} />
             ))}
@@ -1439,6 +1462,7 @@ function DipperRow({ entry, data, staffName, flash, localLabel, onSetLabel }) {
           <span style={{ fontWeight: 800, fontSize: 15, color: COLORS.ink }}>{entry.time || "—"}</span>
           <span style={{ fontSize: 13, color: "#7a8f8d" }}>{durLabel}</span>
           {(localLabel || entry.tempLabel) && <span style={{ fontSize: 12, color: COLORS.gold }}>· {localLabel || entry.tempLabel}</span>}
+          {entry.lateReport && <span style={{ fontSize: 10.5, fontWeight: 700, color: COLORS.gold, background: COLORS.goldLight, borderRadius: 6, padding: "2px 6px" }}>⏰ דיווח מאוחר</span>}
           {isExited && <span style={{ fontSize: 11, color: "#aaa" }}>יצאה</span>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -2830,20 +2854,19 @@ function AdminDippersReport({ mikvehsCtl, currentMikveh }) {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState(todayStr());
   const [allLogs, setAllLogs] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMsg, setDeleteMsg] = useState("");
 
   // Load dippers logs for all mikvehs
-  useEffect(() => {
-    let active = true;
+  const loadLogs = useCallback(() => {
     setAllLogs(null);
-    (async () => {
-      const results = await Promise.all(mikvehs.map(async (m) => {
-        const raw = await storage.get(`dippers-log:${m.id}`).catch(() => null);
-        return { mikvehId: m.id, mikvehName: m.name, entries: Array.isArray(raw) ? raw : [] };
-      }));
-      if (active) setAllLogs(results);
-    })();
-    return () => { active = false; };
+    Promise.all(mikvehs.map(async (m) => {
+      const raw = await storage.get(`dippers-log:${m.id}`).catch(() => null);
+      return { mikvehId: m.id, mikvehName: m.name, entries: Array.isArray(raw) ? raw : [] };
+    })).then(setAllLogs);
   }, [mikvehs]);
+
+  useEffect(() => { loadLogs(); }, [loadLogs]);
 
   const now = new Date();
   const filtered = useMemo(() => {
@@ -2877,12 +2900,13 @@ function AdminDippersReport({ mikvehsCtl, currentMikveh }) {
   const durLabel = (e) => DURATION_OPTIONS.find((d) => d.id === e.duration)?.label || e.duration || "—";
 
   const exportCsv = () => {
-    const header = `תאריך,שעה,מקווה,בלנית,כולל התארגנות,סטטוס תשלום,מזומן,אשראי,מראש\n`;
+    const header = `תאריך,שעה,מקווה,בלנית,כולל התארגנות,סטטוס תשלום,מזומן,אשראי,מראש,דיווח מאוחר\n`;
     const body = filtered.map((e) => [
       e.date, e.time || "", e.mikvehName, e.staffName,
       durLabel(e),
       e.status === "exempt" ? "פטורה" : e.status === "pending" ? "ממתינה" : "שולם",
       e.cash || 0, e.credit || 0, e.prepaid || 0,
+      e.lateReport ? "כן" : "",
     ].join(",")).join("\n");
     const blob = new Blob(["\uFEFF" + header + body], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -2898,6 +2922,34 @@ function AdminDippersReport({ mikvehsCtl, currentMikveh }) {
     { id: "year", label: "שנה נוכחית" },
     { id: "custom", label: "תקופה בחירה" },
   ];
+  const periodLabel = PERIODS.find((p) => p.id === period)?.label + (period === "custom" ? ` (${customFrom || "ההתחלה"} עד ${customTo})` : "");
+
+  const deleteFiltered = async () => {
+    if (!filtered.length || !allLogs) return;
+    if (!window.confirm(`למחוק ${filtered.length} רשומות טבילה מהתקופה "${periodLabel}"?\nפעולה זו אינה הפיכה.`)) return;
+    setDeleting(true); setDeleteMsg("");
+    const idsToDelete = new Set(filtered.map((e) => e.id));
+    const byMikveh = {};
+    filtered.forEach((e) => { (byMikveh[e.mikvehId] = byMikveh[e.mikvehId] || []).push(e); });
+    try {
+      for (const mikvehId of Object.keys(byMikveh)) {
+        const source = allLogs.find((s) => s.mikvehId === mikvehId);
+        if (!source) continue;
+        const remaining = source.entries.filter((e) => !idsToDelete.has(e.id));
+        await storage.set(`dippers-log:${mikvehId}`, remaining);
+        const auditRaw = await storage.get(`audit-log:${mikvehId}`).catch(() => []);
+        const auditPrev = Array.isArray(auditRaw) ? auditRaw : [];
+        const auditEntry = { id: uid(), ts: new Date().toISOString(), staffName: "ניהול", action: "מחיקת רשומות טבילה", details: `${byMikveh[mikvehId].length} רשומות · ${periodLabel}` };
+        await storage.set(`audit-log:${mikvehId}`, [auditEntry, ...auditPrev].slice(0, 500));
+      }
+      setAllLogs((prev) => prev.map((s) => byMikveh[s.mikvehId] ? { ...s, entries: s.entries.filter((e) => !idsToDelete.has(e.id)) } : s));
+      setDeleteMsg(`נמחקו ${filtered.length} רשומות ✓`);
+      setTimeout(() => setDeleteMsg(""), 4000);
+    } catch (e) {
+      setDeleteMsg("שגיאה במחיקה — נסי שוב");
+    }
+    setDeleting(false);
+  };
 
   const showMikveh = selectedMikvehId === "all" && mikvehs.length > 1;
 
@@ -2944,9 +2996,20 @@ function AdminDippersReport({ mikvehsCtl, currentMikveh }) {
             {totals.exempt > 0 && <StatCard label="פטורות (כלה)" value={totals.exempt} icon={Gift} color={COLORS.aqua} />}
           </div>
 
+          {/* Delete-by-period */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+            <button onClick={deleteFiltered} disabled={deleting || !filtered.length} style={{
+              ...btnGhost, color: COLORS.red, borderColor: COLORS.red + "55", fontSize: 12.5, padding: "7px 12px",
+              opacity: (deleting || !filtered.length) ? 0.5 : 1, cursor: (deleting || !filtered.length) ? "default" : "pointer",
+            }}>
+              <Trash2 size={13} /> {deleting ? "מוחקת…" : `מחיקת ${filtered.length} הרשומות בתקופה זו`}
+            </button>
+            {deleteMsg && <span style={{ fontSize: 12.5, fontWeight: 700, color: deleteMsg.startsWith("שגיאה") ? COLORS.red : COLORS.teal }}>{deleteMsg}</span>}
+          </div>
+
           {/* Table */}
           <Table
-            headers={["תאריך", "שעה", ...(showMikveh ? ["מקווה"] : []), "בלנית", "סוג", "תשלום", "סכום"]}
+            headers={["תאריך", "שעה", ...(showMikveh ? ["מקווה"] : []), "בלנית", "סוג", "תשלום", "סכום", ""]}
             rows={filtered.map((e) => [
               fmtDate(e.date),
               e.time || "—",
@@ -2955,6 +3018,7 @@ function AdminDippersReport({ mikvehsCtl, currentMikveh }) {
               durLabel(e),
               e.status === "exempt" ? "פטורה" : e.status === "pending" ? "⏳ ממתינה" : "✓ שולם",
               fmtILS((e.cash || 0) + (e.credit || 0) + (e.prepaid || 0)),
+              e.lateReport ? <span style={{ fontSize: 10.5, fontWeight: 700, color: COLORS.gold, background: COLORS.goldLight, borderRadius: 6, padding: "2px 6px", whiteSpace: "nowrap" }}>⏰ מאוחר</span> : "",
             ])}
             empty="אין רשומות בתקופה זו."
           />
