@@ -3134,6 +3134,16 @@ function PublicMikvehDetail({ mikveh }) {
         <div style={{ position: "absolute", inset: 0, opacity: 0.15 }}>
           <WaveDivider color="#fff" opacity={1} />
         </div>
+        <a href={mapsUrl} target="_blank" rel="noreferrer" title="ניווט למקווה" aria-label="ניווט למקווה"
+          style={{
+            position: "absolute", top: 14, left: 14, zIndex: 2,
+            width: 42, height: 42, borderRadius: "50%",
+            background: COLORS.gold, color: "#fff",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 2px 10px #00000044", textDecoration: "none",
+          }}>
+          <Navigation size={19} />
+        </a>
         <div style={{ position: "relative", zIndex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
             <span style={{ width: 10, height: 10, borderRadius: "50%", background: isOpenDay ? "#8CE0B0" : "#EFA6A0" }} />
@@ -3171,16 +3181,17 @@ function PublicMikvehDetail({ mikveh }) {
               )}
             </div>
           )}
-          <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-            <a href={mapsUrl} target="_blank" rel="noreferrer" style={{ ...btnGold, textDecoration: "none" }}><Navigation size={15} /> ניווט למקווה</a>
+          <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap", alignItems: "center" }}>
             {mikveh.paymentUrl && (
-              <a href={mikveh.paymentUrl} target="_blank" rel="noreferrer" style={{ ...btnBase("#ffffff22", "#fff"), textDecoration: "none" }}>
-                <Wallet size={15} /> לתשלום מקוון
+              <a href={mikveh.paymentUrl} target="_blank" rel="noreferrer" title="לתשלום מקוון" aria-label="לתשלום מקוון"
+                style={{ width: 40, height: 40, borderRadius: "50%", background: "#ffffff22", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", flexShrink: 0 }}>
+                <Wallet size={17} />
               </a>
             )}
             {mikveh.feedbackUrl && (
-              <a href={mikveh.feedbackUrl} target="_blank" rel="noreferrer" style={{ ...btnBase("#ffffff22", "#fff"), textDecoration: "none" }}>
-                <MessageSquare size={15} /> משוב
+              <a href={mikveh.feedbackUrl} target="_blank" rel="noreferrer" title="משוב" aria-label="משוב"
+                style={{ width: 40, height: 40, borderRadius: "50%", background: "#ffffff22", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", flexShrink: 0 }}>
+                <MessageSquare size={17} />
               </a>
             )}
             <button onClick={() => setExpanded((x) => !x)} style={{ ...btnBase("#ffffff22", "#fff") }}>
@@ -3192,15 +3203,26 @@ function PublicMikvehDetail({ mikveh }) {
 
       {expanded && (
         <div>
-          {mikveh.price && (
-            <div style={{ display: "flex", alignItems: "center", gap: 10, background: COLORS.aquaLight, borderRadius: 12, padding: "12px 16px", marginBottom: 4 }}>
-              <Wallet size={16} color={COLORS.teal} />
-              <span style={{ fontWeight: 700, fontSize: 15, color: COLORS.teal }}>עלות טבילה: ₪{mikveh.price}</span>
-              {mikveh.paymentUrl && (
-                <a href={mikveh.paymentUrl} target="_blank" rel="noreferrer" style={{ ...btnPrimary, fontSize: 12.5, padding: "6px 12px", textDecoration: "none", marginRight: "auto" }}>
-                  לתשלום מקוון
-                </a>
+          {(mikveh.price || mikveh.paymentUrl || mikveh.feedbackUrl) && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: COLORS.aquaLight, borderRadius: 12, padding: "12px 16px", marginBottom: 4 }}>
+              {mikveh.price && (
+                <>
+                  <Wallet size={16} color={COLORS.teal} />
+                  <span style={{ fontWeight: 700, fontSize: 15, color: COLORS.teal }}>עלות טבילה: ₪{mikveh.price}</span>
+                </>
               )}
+              <div style={{ display: "flex", gap: 8, marginRight: "auto", flexWrap: "wrap" }}>
+                {mikveh.paymentUrl && (
+                  <a href={mikveh.paymentUrl} target="_blank" rel="noreferrer" style={{ ...btnPrimary, fontSize: 12.5, padding: "6px 12px", textDecoration: "none" }}>
+                    <Wallet size={13} /> לתשלום מקוון
+                  </a>
+                )}
+                {mikveh.feedbackUrl && (
+                  <a href={mikveh.feedbackUrl} target="_blank" rel="noreferrer" style={{ ...btnGhost, fontSize: 12.5, padding: "6px 12px", textDecoration: "none" }}>
+                    <MessageSquare size={13} /> משוב
+                  </a>
+                )}
+              </div>
             </div>
           )}
           <Card title="שעות פתיחה שבועיות" icon={Clock}>
