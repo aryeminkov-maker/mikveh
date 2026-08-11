@@ -44,6 +44,17 @@ function weekdayOf(dateStr) { return WEEKDAYS_HE[new Date(dateStr).getDay()]; }
 function fmtILS(n) { return `₪${Number(n || 0).toLocaleString("he-IL")}`; }
 function uid() { return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7); }
 
+// Forces a re-render every `ms` so time-based calculations (like the load
+// traffic-light, which depends on "now" vs each visit's expected exit time)
+// stay correct as time passes, even if no Firestore data changes.
+function useNowTick(ms = 30000) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+}
+
 /* ============================================================
    URL normalization — converts share links to direct image URLs.
    Handles Google Drive (both /file/d/ and /open?id= formats),
@@ -746,7 +757,7 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
 
       {/* Shift summary modal */}
       {shiftModal === "summary" && (
-        <KioskModal onClose={() => { setShiftModal(null); handleLogout(); }}>
+        <KioskModal onClose={() => setShiftModal(null)}>
           <Check size={30} color={COLORS.teal} style={{ marginBottom: 8 }} />
           <div className="font-display" style={{ fontWeight: 800, fontSize: 20, marginBottom: 16 }}>סיכום משמרת</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18, textAlign: "right" }}>
@@ -759,9 +770,16 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
             {pendingCount > 0 && <SummaryRow label="ממתינות לתשלום" value={pendingCount} warn />}
             {exemptCount > 0 && <SummaryRow label="כלות (פטורות)" value={exemptCount} />}
           </div>
-          <button style={{ ...btnPrimary, width: "100%", justifyContent: "center" }} onClick={() => { setShiftModal(null); handleLogout(); }}>
-            <LogOut size={15} /> סיום וניתוק
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <button style={{ ...btnPrimary, width: "100%", justifyContent: "center" }}
+              onClick={() => { setShiftModal(null); handleLogout(); }}>
+              <LogOut size={15} /> סיום משמרת וניתוק
+            </button>
+            <button style={{ ...btnGhost, width: "100%", justifyContent: "center" }}
+              onClick={() => setShiftModal(null)}>
+              <Check size={15} /> סיום משמרת — להישאר מחובר
+            </button>
+          </div>
         </KioskModal>
       )}
 
@@ -778,6 +796,15 @@ const btnPrimary = btnBase(COLORS.teal, "#fff");
 const btnGold = btnBase(COLORS.gold, COLORS.ink);
 const btnGhost = { ...btnBase("transparent", COLORS.teal), border: `1px solid ${COLORS.teal}55` };
 const btnDanger = btnBase(COLORS.red, "#fff");
+// Small circular icon button — used for the +/- quantity steppers in
+// KioskInventory. Was referenced but never defined, which crashed the
+// entire app (ReferenceError: roundBtn is not defined) the moment the
+// "מלאי" tab rendered.
+const roundBtn = {
+  width: 40, height: 40, borderRadius: "50%", border: `1.5px solid ${COLORS.aqua}44`,
+  background: "#fff", color: COLORS.teal, cursor: "pointer",
+  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+};
 
 function Toast({ text }) {
   return (
@@ -881,10 +908,12 @@ function KioskLogin({ staff, onLogin, mikveh, onLeaveDevice }) {
 }
 
 function KioskDippersWithStatus({ data, mikveh, navigate, flash, staffName }) {
+  useNowTick(30000); // keep the load badge accurate as visits' expected exit times pass
   const today = todayStr();
   const todayRec = data.checklist[today];
   const statusColor = todayRec?.closed ? "#7a8f8d" : todayRec?.opened ? COLORS.teal : COLORS.red;
   const statusText = todayRec?.closed ? "משמרת נסגרה" : todayRec?.opened ? "משמרת פתוחה" : "טרם נפתח";
+  const load = estimateLoad(data.dippersLog, mikveh, today, mikveh.manualLoad);
 
   return (
     <>
@@ -905,6 +934,11 @@ function KioskDippersWithStatus({ data, mikveh, navigate, flash, staffName }) {
           <Bell size={15} color={COLORS.gold} style={{ flexShrink: 0 }} />{todayRec.dailyNote}
         </div>
       )}
+      <div style={{ background: COLORS.paper, borderRadius: 14, padding: "12px 16px", marginBottom: 14, border: `1px solid ${COLORS.aqua}22` }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#7a8f8d", marginBottom: 6 }}>עומס במקווה</div>
+        <LoadBadge load={load} inline />
+        <ManualLoadPicker load={load} onManualLoad={mikveh.onManualLoad} />
+      </div>
       <KioskDippers data={data} staffName={staffName} flash={flash} mikveh={mikveh} />
     </>
   );
@@ -1703,6 +1737,158 @@ function StatMini({ label, value, warn }) {
       <div style={{ fontSize: 17, fontWeight: 800, color: warn ? COLORS.red : COLORS.ink }}>{value}</div>
       <div style={{ fontSize: 10.5, color: "#7a8f8d" }}>{label}</div>
     </div>
+  );
+}
+
+function AdminDashboard({ data }) {
+  const today = todayStr();
+  const todayEntries = data.dippersLog.filter((e) => e.date === today);
+  const todayCash = todayEntries.reduce((s, e) => s + (e.cash || 0), 0);
+  const todayCredit = todayEntries.reduce((s, e) => s + (e.credit || 0), 0);
+  const todayPrepaid = todayEntries.reduce((s, e) => s + (e.prepaid || 0), 0);
+  const openTickets = data.malfunctions.filter((m) => m.status !== "טופל");
+  const lowStock = Object.entries(data.inventory).filter(([, i]) => i.qty <= i.threshold);
+  const unresolvedNotes = data.notes.filter((n) => !n.resolved);
+  const todayRec = data.checklist[today];
+  const shiftStatus = todayRec?.closed ? "המשמרת נסגרה" : todayRec?.opened ? "המשמרת פתוחה" : "המשמרת טרם נפתחה";
+
+  // Last 7 days, for the trend chart
+  const last7 = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (6 - i));
+    const key = d.toISOString().slice(0, 10);
+    const count = data.dippersLog.filter((e) => e.date === key).length;
+    return { day: WEEKDAYS_HE[d.getDay()], count };
+  });
+
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 16 }}>
+        <StatCard icon={Wallet} label="טובלות היום" value={todayEntries.length} color={COLORS.teal} />
+        <StatCard icon={FileSpreadsheet} label='הכנסות היום' value={fmtILS(todayCash + todayCredit + todayPrepaid)} color={COLORS.gold} />
+        <StatCard icon={Wrench} label="קריאות פתוחות" value={openTickets.length} color={openTickets.length ? COLORS.red : COLORS.teal} warn={openTickets.length > 0} />
+        <StatCard icon={Package} label="פריטים בחוסר" value={lowStock.length} color={lowStock.length ? COLORS.gold : COLORS.teal} warn={lowStock.length > 0} />
+      </div>
+
+      <Card title="מצב המשמרת היום" icon={ClipboardList}>
+        <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: COLORS.teal }}>{shiftStatus}</p>
+        {todayRec?.dailyNote && <p style={{ margin: "8px 0 0", fontSize: 13, color: "#7a8f8d" }}>הודעה יומית: {todayRec.dailyNote}</p>}
+      </Card>
+
+      <Card title="טובלות ב-7 הימים האחרונים" icon={TrendingUp}>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={last7}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#00000010" />
+            <XAxis dataKey="day" fontSize={12} />
+            <YAxis fontSize={12} allowDecimals={false} />
+            <Tooltip />
+            <Bar dataKey="count" fill={COLORS.aqua} radius={[6, 6, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+
+      {openTickets.length > 0 && (
+        <Card title="קריאות תפעול פתוחות" icon={Wrench}>
+          <Table headers={["תיאור", "נפתחה"]} rows={openTickets.slice(0, 8).map((t) => [t.description || t.title || "—", fmtDateTime(t.createdAt || t.ts)])} empty="" />
+        </Card>
+      )}
+
+      {unresolvedNotes.length > 0 && (
+        <Card title="פתקים פתוחים" icon={StickyNote}>
+          <Table headers={["פתק", "מתי"]} rows={unresolvedNotes.slice(0, 8).map((n) => [n.text || "—", fmtDateTime(n.createdAt || n.ts)])} empty="" />
+        </Card>
+      )}
+    </>
+  );
+}
+
+function StatCard({ icon: Icon, label, value, color, warn }) {
+  return (
+    <div style={{
+      background: COLORS.paper, borderRadius: 16, padding: "16px 14px",
+      border: `1.5px solid ${warn ? color + "55" : COLORS.aqua + "22"}`,
+    }}>
+      <Icon size={20} color={color} style={{ marginBottom: 8 }} />
+      <div style={{ fontSize: 22, fontWeight: 900, color: COLORS.ink, lineHeight: 1.1 }}>{value}</div>
+      <div style={{ fontSize: 12, color: "#7a8f8d", marginTop: 2 }}>{label}</div>
+    </div>
+  );
+}
+
+function AdminPermissions({ adminEmails, setAdminEmails, mikvehs, authUser }) {
+  const [newAdminEmail, setNewAdminEmail] = useState("");
+  const [newAdminName, setNewAdminName] = useState("");
+  const [kioskEmails, setKioskEmails] = useShared("kiosk-emails", []);
+  const [staff] = useShared("staff:global", DEFAULT_STAFF);
+  const [guestEmail, setGuestEmail] = useState("");
+  const [guestStaffId, setGuestStaffId] = useState("");
+  const [guestMikvehId, setGuestMikvehId] = useState(mikvehs[0]?.id || "");
+
+  const addAdmin = () => {
+    const email = newAdminEmail.trim().toLowerCase();
+    if (!email) return;
+    if (adminEmails.some((a) => a.email === email)) return;
+    setAdminEmails((prev) => [...prev, { email, name: newAdminName.trim() || email, addedAt: new Date().toISOString() }]);
+    setNewAdminEmail(""); setNewAdminName("");
+  };
+  const removeAdmin = (email) => setAdminEmails((prev) => prev.filter((a) => a.email !== email));
+
+  const addGuest = () => {
+    const email = guestEmail.trim().toLowerCase();
+    const staffMember = staff.find((s) => s.id === guestStaffId);
+    if (!email || !staffMember || !guestMikvehId) return;
+    setKioskEmails((prev) => [...prev, { email, staffName: staffMember.name, mikvehId: guestMikvehId, addedAt: new Date().toISOString() }]);
+    setGuestEmail(""); setGuestStaffId("");
+  };
+  const removeGuest = (idx) => setKioskEmails((prev) => prev.filter((_, i) => i !== idx));
+
+  return (
+    <>
+      <Card title="מנהלים מאושרים" icon={ShieldCheck}>
+        <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
+          חשבונות Google ברשימה הזו יכולים להיכנס לממשק "ניהול ובקרה".
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10, marginBottom: 12 }}>
+          <Field label="אימייל Google"><input style={inputStyle} value={newAdminEmail} onChange={(e) => setNewAdminEmail(e.target.value)} placeholder="name@gmail.com" /></Field>
+          <Field label="שם (אופציונלי)"><input style={inputStyle} value={newAdminName} onChange={(e) => setNewAdminName(e.target.value)} /></Field>
+        </div>
+        <button style={btnPrimary} onClick={addAdmin}><Plus size={16} /> הוספת מנהל/ת</button>
+        <div style={{ marginTop: 14 }}>
+          <Table headers={["שם", "אימייל", ""]} rows={adminEmails.map((a) => [
+            a.name, a.email,
+            a.email === authUser.email.toLowerCase()
+              ? <span style={{ fontSize: 12, color: "#7a8f8d" }}>(את/ה)</span>
+              : <button style={{ ...btnGhost, padding: "5px 10px", fontSize: 12 }} onClick={() => removeAdmin(a.email)}><Trash2 size={13} /></button>,
+          ])} empty="אין עדיין מנהלים מאושרים." />
+        </div>
+      </Card>
+
+      <Card title="הרשאות כניסה נוספות לבלניות" icon={Users}>
+        <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
+          למחליפות/אורחות שנכנסות עם חשבון Google אישי (לא הטאבלט הקבוע) — משייך אימייל לבלנית קיימת במקווה מסוים.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10, marginBottom: 12 }}>
+          <Field label="אימייל Google"><input style={inputStyle} value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} placeholder="name@gmail.com" /></Field>
+          <Field label="בלנית">
+            <select style={inputStyle} value={guestStaffId} onChange={(e) => setGuestStaffId(e.target.value)}>
+              <option value="">בחירה…</option>
+              {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
+          <Field label="מקווה">
+            <select style={inputStyle} value={guestMikvehId} onChange={(e) => setGuestMikvehId(e.target.value)}>
+              {mikvehs.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </Field>
+        </div>
+        <button style={btnPrimary} onClick={addGuest}><Plus size={16} /> הוספת הרשאה</button>
+        <div style={{ marginTop: 14 }}>
+          <Table headers={["אימייל", "בלנית", "מקווה", ""]} rows={kioskEmails.map((g, idx) => [
+            g.email, g.staffName, mikvehs.find((m) => m.id === g.mikvehId)?.name || g.mikvehId,
+            <button style={{ ...btnGhost, padding: "5px 10px", fontSize: 12 }} onClick={() => removeGuest(idx)}><Trash2 size={13} /></button>,
+          ])} empty="אין עדיין הרשאות נוספות." />
+        </div>
+      </Card>
+    </>
   );
 }
 
@@ -2801,7 +2987,7 @@ function estimateLoad(dippersLog, mikveh, today, manualLoad) {
     const [h, m] = e.time.split(":").map(Number);
     if (isNaN(h) || isNaN(m)) return;
     const start = new Date(now); start.setHours(h, m, 0, 0);
-    const durMin = e.customMinutes || DURATION_MINUTES[e.duration] || 20;
+    const durMin = e.minutes || DURATION_MINUTES[e.duration] || 20;
     const end = new Date(start.getTime() + durMin * 60000);
     if (now < end) {
       active.push({ needsPrep: e.duration !== "dip", exitAt: end, durMin });
@@ -2861,6 +3047,37 @@ function LoadBadge({ load, inline }) {
   );
 }
 
+// Lets staff/admins override the automatic traffic-light, or hand control
+// back to the automatic calculation ("אוטומטי"). onManualLoad(level) is
+// called with "green" | "orange" | "red" | null.
+function ManualLoadPicker({ load, onManualLoad }) {
+  if (!onManualLoad) return null;
+  const OPTIONS = [
+    { id: "green", label: "ירוק", color: "#22c55e", bg: "#dcfce7" },
+    { id: "orange", label: "כתום", color: "#f97316", bg: "#ffedd5" },
+    { id: "red", label: "אדום", color: "#ef4444", bg: "#fee2e2" },
+  ];
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+      {OPTIONS.map((o) => {
+        const active = load?.manual && load.level === o.id;
+        return (
+          <button key={o.id} type="button" onClick={() => onManualLoad(o.id)} style={{
+            padding: "5px 12px", borderRadius: 9, cursor: "pointer", fontWeight: 700, fontSize: 12,
+            border: `1.5px solid ${active ? o.color : "#e0e8ec"}`,
+            background: active ? o.bg : "#fff", color: active ? o.color : "#7a8f8d",
+          }}>{o.label}</button>
+        );
+      })}
+      <button type="button" onClick={() => onManualLoad(null)} style={{
+        padding: "5px 12px", borderRadius: 9, cursor: "pointer", fontWeight: 700, fontSize: 12,
+        border: `1.5px solid ${!load?.manual ? COLORS.teal : "#e0e8ec"}`,
+        background: !load?.manual ? COLORS.aquaLight : "#fff", color: !load?.manual ? COLORS.teal : "#7a8f8d",
+      }}>אוטומטי</button>
+    </div>
+  );
+}
+
 function tonightStaff(data, weekday, today) {
   if (!data || !data.defaultSchedule) return { shifts: [], names: [], isActual: false };
   const todayRec = data.checklist[today];
@@ -2894,6 +3111,7 @@ function tonightStaff(data, weekday, today) {
 
 function PublicMikvehDetail({ mikveh }) {
   const data = useSystemData(mikveh.id);
+  useNowTick(30000); // keep the load badge accurate as visits' expected exit times pass
   const today = todayStr();
   const weekday = new Date().getDay();
   const hours = mikveh.hours || OPENING_HOURS;
