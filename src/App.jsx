@@ -173,7 +173,7 @@ function useEnsureBaselineAuth() {
    Stored under one shared key (not mikveh-specific).
    ============================================================ */
 function useMikvehs() {
-  const [list, setList] = useShared("mikvehs", DEFAULT_MIKVEHS);
+  const [list, setList, loaded] = useShared("mikvehs", DEFAULT_MIKVEHS);
 
   const addMikveh = useCallback((name, address) => {
     setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, bathRooms: 2, showerRooms: 1, price: "25", paymentUrl: "", manualLoad: null, feedbackUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
@@ -191,7 +191,7 @@ function useMikvehs() {
     setList((prev) => prev.map((m) => m.id === id ? { ...m, setupToken: uid() } : m));
   }, [setList]);
 
-  return { list, addMikveh, updateMikveh, removeMikveh, regenerateToken };
+  return { list, loaded, addMikveh, updateMikveh, removeMikveh, regenerateToken };
 }
 
 const DEVICE_KEY = "mikveh-kiosk-device-id";
@@ -253,10 +253,10 @@ export default function MikvehSystem() {
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 16px 48px" }}>
         {topRoute === "kiosk" && <KioskApp mikvehs={mikvehs.list} mikvehsCtl={mikvehs} />}
         {topRoute === "admin" && <AdminApp mikvehsCtl={mikvehs} />}
-        {topRoute === "public" && <PublicApp mikvehs={mikvehs.list} />}
+        {topRoute === "public" && <PublicApp mikvehs={mikvehs.list} loaded={mikvehs.loaded} />}
       </div>
       <footer style={{ textAlign: "center", padding: "18px 8px", fontSize: 12.5, color: COLORS.teal, opacity: 0.65 }}>
-        מקוואות בית אל · הנתונים משותפים בין כל מי שפותח את המסמך הזה
+        הכלי פותח על ידי <a href="mailto:m.dat@bet-el.muni.il" style={{ color: COLORS.teal, textDecoration: "underline" }}>מחלקת דת</a> במועצה המקומית בית אל
       </footer>
     </div>
   );
@@ -1138,68 +1138,81 @@ function KioskDippers({ data, staffName, flash, mikveh }) {
   };
 
   const DUR_BTNS = [
-    { id: "dip",   label: "רק טבילה",       sub: "~20′", minutes: 20 },
-    { id: "prep",  label: "גם התארגנות",   sub: "~60′", minutes: 60 },
-    { id: "bride", label: "כלה",             sub: "~120′", minutes: 120 },
+    { id: "dip",   label: "רק טבילה",     sub: "~20′" },
+    { id: "prep",  label: "גם התארגנות", sub: "~60′" },
+    { id: "bride", label: "כלה",           sub: "~120′" },
   ];
   const PAY_BTNS = [
-    { id: "paid-cash",    label: "מזומן",         color: COLORS.teal },
-    { id: "paid-credit",  label: "אשראי",          color: COLORS.teal },
-    { id: "paid-prepaid", label: "מראש",            color: COLORS.teal },
-    { id: "pending",      label: "תשלם בהמשך",    color: COLORS.gold },
-    { id: "exempt",       label: "כלה בשנה הראשונה",   color: "#7c3aed" },
+    { id: "paid-cash",    label: "מזומן",                   color: "#059669", bg: "#d1fae5" },
+    { id: "paid-credit",  label: "אשראי",                    color: "#0284c7", bg: "#e0f2fe" },
+    { id: "paid-prepaid", label: "מראש",                     color: "#7c3aed", bg: "#ede9fe" },
+    { id: "pending",      label: "תשלם בהמשך",             color: "#b45309", bg: "#fef3c7" },
+    { id: "exempt",       label: "כלה בשנה הראשונה",        color: "#be185d", bg: "#fce7f3" },
   ];
 
   return (
     <>
       {/* ── Add form ── */}
-      <div style={{ background: COLORS.paper, borderRadius: 18, padding: "18px 16px", marginBottom: 14, border: `1px solid ${COLORS.aqua}22` }}>
-        {/* Entry time — small, unobtrusive */}
+      <div style={{ background: COLORS.paper, borderRadius: 18, padding: "16px", marginBottom: 14, border: `1px solid ${COLORS.aqua}22` }}>
+
+        {/* Entry time */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 14, fontSize: 13, color: "#7a8f8d" }}>
           <span>שעת כניסה</span>
           <input type="time" value={entryTime} onChange={(e) => setEntryTime(e.target.value)}
             style={{ border: "none", background: COLORS.seafoam, borderRadius: 8, padding: "4px 10px", fontSize: 13, color: COLORS.ink, fontWeight: 600 }} />
         </div>
 
-        {/* Duration buttons */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
-          {DUR_BTNS.map((d) => {
-            const active = dur === d.id;
-            return (
-              <button key={d.id} onClick={() => setDur(d.id)} style={{
-                padding: "16px 8px", borderRadius: 14, border: `2px solid ${active ? COLORS.teal : "#e0e8ec"}`,
-                background: active ? COLORS.teal : "#fff", color: active ? "#fff" : COLORS.ink,
-                fontWeight: 700, fontSize: 15, cursor: "pointer", lineHeight: 1.3, textAlign: "center",
-              }}>
-                {d.label}
-                <div style={{ fontSize: 11, fontWeight: 500, opacity: 0.7, marginTop: 2 }}>{d.sub}</div>
-              </button>
-            );
-          })}
+        {/* Section: duration — blue theme */}
+        <div style={{ background: COLORS.aquaLight, borderRadius: 14, padding: "12px 12px 14px", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: COLORS.teal, marginBottom: 10 }}>⏱ סוג הטבילה</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            {DUR_BTNS.map((d) => {
+              const active = dur === d.id;
+              return (
+                <button key={d.id} onClick={() => setDur(d.id)} style={{
+                  padding: "14px 6px", borderRadius: 12,
+                  border: `2.5px solid ${active ? COLORS.teal : "transparent"}`,
+                  background: active ? COLORS.teal : "#fff",
+                  color: active ? "#fff" : COLORS.ink,
+                  fontWeight: 700, fontSize: 14, cursor: "pointer", lineHeight: 1.3, textAlign: "center",
+                  boxShadow: active ? "0 2px 8px #12628a33" : "0 1px 3px #0002",
+                }}>
+                  {d.label}
+                  <div style={{ fontSize: 11, fontWeight: 500, opacity: 0.65, marginTop: 3 }}>{d.sub}</div>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        {/* Payment buttons */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
-          {PAY_BTNS.map((p) => {
-            const active = pay === p.id;
-            return (
-              <button key={p.id} onClick={() => setPay(p.id)} style={{
-                padding: "14px 4px", borderRadius: 14, border: `2px solid ${active ? p.color : "#e0e8ec"}`,
-                background: active ? p.color : "#fff", color: active ? "#fff" : COLORS.ink,
-                fontWeight: 700, fontSize: 13.5, cursor: "pointer", lineHeight: 1.3, textAlign: "center",
-              }}>
-                {p.label}
-              </button>
-            );
-          })}
+        {/* Section: payment — green/warm theme */}
+        <div style={{ background: "#f0fdf4", borderRadius: 14, padding: "12px 12px 14px", marginBottom: 14, border: "1px solid #bbf7d0" }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#059669", marginBottom: 10 }}>💳 תשלום</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            {PAY_BTNS.map((p) => {
+              const active = pay === p.id;
+              return (
+                <button key={p.id} onClick={() => setPay(p.id)} style={{
+                  padding: "13px 4px", borderRadius: 12,
+                  border: `2.5px solid ${active ? p.color : "transparent"}`,
+                  background: active ? p.bg : "#fff",
+                  color: active ? p.color : COLORS.ink,
+                  fontWeight: 700, fontSize: 13, cursor: "pointer", lineHeight: 1.3, textAlign: "center",
+                  boxShadow: active ? `0 2px 8px ${p.color}33` : "0 1px 3px #0002",
+                }}>
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        {/* Amount — only when payment chosen and not pending/exempt */}
+        {/* Amount */}
         {pay && pay.startsWith("paid") && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-            <span style={{ fontSize: 13.5, color: "#7a8f8d" }}>סכום ₪</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, background: "#f8fbfc", borderRadius: 10, padding: "10px 14px" }}>
+            <span style={{ fontSize: 14, color: "#7a8f8d" }}>סכום ₪</span>
             <input type="number" min="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)}
-              inputMode="decimal" style={{ width: 100, border: "2px solid #e0e8ec", borderRadius: 10, padding: "8px 12px", fontSize: 16, fontWeight: 700, textAlign: "center" }} />
+              inputMode="decimal" style={{ flex: 1, border: "2px solid #e0e8ec", borderRadius: 10, padding: "8px 12px", fontSize: 18, fontWeight: 800, textAlign: "center" }} />
           </div>
         )}
 
@@ -2408,6 +2421,86 @@ function AdminWater({ data }) {
   );
 }
 
+function AdminStaff({ data, mikveh }) {
+  const [kioskEmails, setKioskEmails] = useShared("kiosk-emails", []);
+  const [editing, setEditing] = useState(null);
+  const emptyDraft = { name: "", phone: "", email: "", pin: "" };
+  const [draft, setDraft] = useState(emptyDraft);
+
+  const startEdit = (s) => { setEditing(s.id); setDraft({ name: s.name, phone: s.phone || "", email: s.email || "", pin: s.pin || "" }); };
+  const startNew = () => { setEditing("new"); setDraft(emptyDraft); };
+  const cancelEdit = () => { setEditing(null); setDraft(emptyDraft); };
+
+  const saveEdit = () => {
+    if (!draft.name.trim() || !/^\d{4}$/.test(draft.pin)) { window.alert("נא למלא שם וקוד אישי בן 4 ספרות"); return; }
+    if (editing === "new") {
+      data.setStaff((prev) => [...prev, { id: uid(), name: draft.name.trim(), phone: draft.phone.trim(), email: draft.email.trim().toLowerCase(), pin: draft.pin }]);
+    } else {
+      data.setStaff((prev) => prev.map((s) => s.id === editing ? { ...s, ...draft, email: draft.email.trim().toLowerCase() } : s));
+    }
+    cancelEdit();
+  };
+
+  const removeStaff = (id) => {
+    if (window.confirm("להסיר את הבלנית מהצוות?")) data.setStaff((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const guestList = mikveh ? kioskEmails.filter((e) => e.mikvehId === mikveh?.id) : [];
+  const [guestName, setGuestName] = useState("");
+  const [guestEmail, setGuestEmail] = useState("");
+  const [guestMikvehId, setGuestMikvehId] = useState(mikveh?.id || "");
+  const addGuest = () => {
+    if (!guestName.trim() || !guestEmail.trim()) return;
+    setKioskEmails((prev) => [...prev, { email: guestEmail.trim().toLowerCase(), staffName: guestName.trim(), mikvehId: guestMikvehId, addedAt: new Date().toISOString() }]);
+    setGuestName(""); setGuestEmail("");
+  };
+  const removeGuest = (email) => setKioskEmails((prev) => prev.filter((e) => e.email !== email));
+
+  return (
+    <>
+      <Card title="צוות בלניות" icon={Users} right={!editing && <button style={{ ...btnGhost, padding: "7px 12px", fontSize: 12.5 }} onClick={startNew}><Plus size={14} /> בלנית חדשה</button>}>
+        <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>רשימה כלל-מועצתית — מופיעה בכל המקוואות. שיבוץ נעשה בתוך כל מקווה. האימייל מאפשר כניסה מהטלפון האישי.</p>
+        {editing && (
+          <div style={{ background: COLORS.seafoam, borderRadius: 12, padding: 14, marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 10 }}>
+              <Field label="שם"><input style={inputStyle} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
+              <Field label="טלפון"><input style={inputStyle} value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></Field>
+              <Field label="אימייל (Google)"><input style={inputStyle} value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} placeholder="name@gmail.com" /></Field>
+              <Field label="קוד אישי (4 ספרות)"><input style={inputStyle} value={draft.pin} maxLength={4} inputMode="numeric" onChange={(e) => setDraft({ ...draft, pin: e.target.value.replace(/\D/g, "") })} /></Field>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button style={btnPrimary} onClick={saveEdit}><Check size={15} /> שמירה</button>
+              <button style={btnGhost} onClick={cancelEdit}>ביטול</button>
+            </div>
+          </div>
+        )}
+        <Table headers={["שם", "טלפון", "אימייל", "קוד", ""]}
+          rows={data.staff.map((s) => [s.name, s.phone || "—", s.email || "—", s.pin,
+            <div key="a" style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => startEdit(s)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5 }}>עריכה</button>
+              <button onClick={() => removeStaff(s.id)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5, color: COLORS.red }}><Trash2 size={12} /></button>
+            </div>
+          ])}
+          empty="אין עדיין בלניות בצוות." />
+      </Card>
+
+      <Card title="הרשאות כניסה נוספות" icon={KeyRound}>
+        <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>למי שאינה חלק קבוע מהצוות — מאשר כניסה מהטלפון האישי.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 14 }}>
+          <input placeholder="שם" style={inputStyle} value={guestName} onChange={(e) => setGuestName(e.target.value)} />
+          <input placeholder="name@gmail.com" style={inputStyle} value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} />
+          <button style={btnPrimary} onClick={addGuest}><Plus size={15} /> הוספה</button>
+        </div>
+        <Table headers={["שם", "אימייל", ""]}
+          rows={kioskEmails.map((g) => [g.staffName, g.email,
+            <button key="x" onClick={() => removeGuest(g.email)} style={{ ...btnGhost, padding: "4px 8px", fontSize: 11.5, color: COLORS.red }}><Trash2 size={12} /></button>
+          ])}
+          empty="אין הרשאות נוספות." />
+      </Card>
+    </>
+  );
+}
+
 function AdminDippersReport({ mikvehsCtl, currentMikveh }) {
   const mikvehs = mikvehsCtl.list;
   const [selectedMikvehId, setSelectedMikvehId] = useState("all");
@@ -2652,7 +2745,15 @@ function Table({ headers, rows, empty }) {
 /* ============================================================
    PUBLIC APP (residents)
    ============================================================ */
-function PublicApp({ mikvehs }) {
+function PublicApp({ mikvehs, loaded }) {
+  if (!loaded) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 300, gap: 16 }}>
+        <Droplets size={36} color={COLORS.aqua} style={{ animation: "spin 1.5s linear infinite" }} />
+        <p style={{ fontSize: 16, color: COLORS.teal, fontWeight: 600, margin: 0 }}>טוען נתונים…</p>
+      </div>
+    );
+  }
   if (mikvehs.length === 0) {
     return <div style={{ paddingTop: 40 }}><Empty text="אין כרגע מקוואות פעילים במערכת." /></div>;
   }
