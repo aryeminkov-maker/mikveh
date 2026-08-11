@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { storage } from "./storage";
 import { signInWithGoogle, signOutUser, subscribeAuth, ensureAnonymousAuth } from "./auth";
+import { getZmanim, getSpecialDayInfo, formatHM } from "./zmanim";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend
@@ -145,8 +146,52 @@ const OPENING_HOURS = [
   { day: "שבת", hours: "צאת השבת–00:00" },
 ];
 
+// חגים שבהם שעות הפתיחה מחושבות אוטומטית לפי ההגדרות של יום שבת (יום 6 במערך
+// hours). מזוהה לפי מילת מפתח בתוך שם החג בעברית שמחזירה ספריית Hebcal.
+const HOLIDAY_USES_SHABBAT_HOURS = ["ראש השנה", "סוכות", "שמיני עצרת", "שמחת תורה", "פסח", "שבועות"];
+
+// בודק אם תאריך נתון הוא אחד מהחגים שמוגדר עבורם להשתמש בשעות של שבת, ואם כן
+// מחזיר גם את שם החג לתצוגה. נשען על getSpecialDayInfo (זיהוי חגים ע"פ הלוח
+// העברי) — אם הספרייה לא זמינה, מתנהג כמו יום רגיל (ללא חריגה).
+function holidayShabbatOverride(date) {
+  const special = getSpecialDayInfo(date);
+  if (special && special.kind === "chag" && HOLIDAY_USES_SHABBAT_HOURS.some((k) => (special.holidayName || "").includes(k))) {
+    return special.holidayName || special.label;
+  }
+  return null;
+}
+
+// מחזיר את תצורת היום הרלוונטית ל-mikveh בתאריך נתון: בדרך כלל יום השבוע
+// המתאים, אבל בחג מהרשימה למעלה — תצורת יום שבת (אינדקס 6) במקום.
+function getEffectiveDayConfig(mikveh, date) {
+  const hours = mikveh.hours || OPENING_HOURS;
+  const holidayName = holidayShabbatOverride(date);
+  if (holidayName) return { config: hours[6], holidayName };
+  return { config: hours[date.getDay()], holidayName: null };
+}
+
+// הופך תצורת יום (טקסט חופשי, או כלל יחסי לזמן הלכתי) למחרוזת שעות להצגה.
+// אם מוגדר כלל יחסי לזמן הלכתי (zman) — מנסה לחשב בפועל; בכל כשל (ספרייה לא
+// נטענה, זמן לא תקין וכו') נופל בבטחה חזרה לטקסט החופשי שהוגדר בניהול (או
+// "לא הוגדר" אם גם הוא ריק) — כדי שהתצוגה לעולם לא תישבר.
+function resolveDayHours(dayConfig, date) {
+  if (!dayConfig) return "לא הוגדר";
+  if (!dayConfig.zman) return dayConfig.hours || "לא הוגדר";
+  try {
+    const z = getZmanim(date);
+    const anchor = dayConfig.zman.anchor === "tzeit" ? z.tzeit : z.sunset;
+    if (!anchor || isNaN(anchor.getTime())) throw new Error("זמן הלכתי לא תקין");
+    const start = new Date(anchor.getTime() + (Number(dayConfig.zman.offsetMin) || 0) * 60000);
+    const end = new Date(start.getTime() + (Number(dayConfig.zman.durationMin) || 120) * 60000);
+    return `${formatHM(start)}–${formatHM(end)}`;
+  } catch (e) {
+    return dayConfig.hours || "לא הוגדר";
+  }
+}
+
+
 const DEFAULT_MIKVEHS = [
-  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, bathRooms: 2, showerRooms: 1, price: "25", paymentUrl: "", manualLoad: null, feedbackUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
+  { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, bathRooms: 2, showerRooms: 1, price: "25", paymentUrl: "", manualLoad: null, feedbackUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
 ];
 
 /* ============================================================
@@ -187,7 +232,7 @@ function useMikvehs() {
   const [list, setList, loaded] = useShared("mikvehs", DEFAULT_MIKVEHS);
 
   const addMikveh = useCallback((name, address) => {
-    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", accessible: true, amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, bathRooms: 2, showerRooms: 1, price: "25", paymentUrl: "", manualLoad: null, feedbackUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
+    setList((prev) => [...prev, { id: uid(), name, address, phone: "", notes: "", amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, bathRooms: 2, showerRooms: 1, price: "25", paymentUrl: "", manualLoad: null, feedbackUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() }]);
   }, [setList]);
 
   const updateMikveh = useCallback((id, patch) => {
@@ -612,14 +657,42 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
   const [toast, setToast] = useState(null);
   const [shiftModal, setShiftModal] = useState(null); // null | "close" | "transfer"
   const [transferTo, setTransferTo] = useState("");
+  const [pendingLogin, setPendingLogin] = useState(null); // { staffMember, conflictName } — awaiting takeover confirmation
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2600); };
 
-  const handleLogin = (staffMember) => {
+  const today = todayStr();
+
+  // Whoever's login is the most recent one logged today (login-log is
+  // prepended, so [0] is newest), as long as the shift hasn't been closed.
+  const activeLoginToday = () => {
+    if (data.checklist[today]?.closed) return null;
+    const todays = data.loginLog.filter((l) => l.ts.slice(0, 10) === today);
+    return todays.length ? todays[0] : null;
+  };
+
+  const doLogin = (staffMember, isTakeover, fromName) => {
     setCurrent(staffMember);
     data.setLoginLog((prev) => [{ id: uid(), staffId: staffMember.id, staffName: staffMember.name, ts: new Date().toISOString() }, ...prev].slice(0, 400));
-    data.addAudit(staffMember.name, "כניסה למשמרת", "התחברות לטאבלט הבלנית");
+    data.addAudit(staffMember.name, isTakeover ? "העברת משמרת" : "כניסה למשמרת",
+      isTakeover ? `המשמרת הועברה מ${fromName}` : "התחברות לטאבלט הבלנית");
   };
+
+  const handleLogin = (staffMember) => {
+    const active = activeLoginToday();
+    if (active && active.staffName !== staffMember.name) {
+      setPendingLogin({ staffMember, conflictName: active.staffName });
+      return;
+    }
+    doLogin(staffMember, false);
+  };
+
+  const confirmTakeover = () => {
+    if (!pendingLogin) return;
+    doLogin(pendingLogin.staffMember, true, pendingLogin.conflictName);
+    setPendingLogin(null);
+  };
+  const cancelTakeover = () => setPendingLogin(null);
 
   useEffect(() => {
     if (personalPhone && presetStaffName && !current) {
@@ -628,7 +701,6 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [personalPhone, presetStaffName]);
 
-  const today = todayStr();
   const todayEntries = data.dippersLog.filter((e) => e.date === today);
   const totalDippers = todayEntries.length;
   const totalCash = todayEntries.reduce((s, e) => s + (e.cash || 0), 0);
@@ -663,8 +735,25 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
   };
 
   if (!current) {
-    if (personalPhone) return <CenteredLoading text="מתחברת…" />;
-    return <KioskLogin staff={data.staff} onLogin={handleLogin} mikveh={mikveh} onLeaveDevice={onLeaveDevice} />;
+    return (
+      <>
+        {personalPhone ? <CenteredLoading text="מתחברת…" /> : <KioskLogin staff={data.staff} onLogin={handleLogin} mikveh={mikveh} onLeaveDevice={onLeaveDevice} />}
+        {pendingLogin && (
+          <KioskModal onClose={cancelTakeover}>
+            <Users size={26} color={COLORS.teal} style={{ marginBottom: 8 }} />
+            <div className="font-display" style={{ fontWeight: 700, fontSize: 18, marginBottom: 6 }}>החלפת בלנית</div>
+            <p style={{ fontSize: 13.5, color: "#3a5250", marginBottom: 18 }}>
+              בלנית <b>{pendingLogin.conflictName}</b> כבר נמצאת במערכת במקווה הזה היום.
+              האם <b>{pendingLogin.staffMember.name}</b> מחליפה אותה?
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button style={{ ...btnGhost, flex: 1, justifyContent: "center" }} onClick={cancelTakeover}>לא</button>
+              <button style={{ ...btnPrimary, flex: 1, justifyContent: "center" }} onClick={confirmTakeover}>כן, החליפה</button>
+            </div>
+          </KioskModal>
+        )}
+      </>
+    );
   }
 
   const kioskTabs = [
@@ -1962,7 +2051,8 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
   const today = todayStr();
   const weekday = new Date().getDay();
   const hours = mikveh.hours || OPENING_HOURS;
-  const todaysHours = (hours[weekday] || {}).hours || "לא הוגדר";
+  const { config: todayDayConfig, holidayName: todayHolidayName } = getEffectiveDayConfig(mikveh, new Date());
+  const todaysHours = resolveDayHours(todayDayConfig, new Date());
   const isOpenNow = !!(data.checklist[today]?.opened && !data.checklist[today]?.closed);
   const { names: tonightNames } = tonightStaff(data, weekday, today);
   const todayDippers = data.dippersLog.filter((d) => d.date === today).length;
@@ -2041,6 +2131,14 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
   const addAmenity = () => { if (!newAmenity.trim()) return; mikvehsCtl.updateMikveh(mikveh.id, { amenities: [...(mikveh.amenities || []), newAmenity.trim()] }); setNewAmenity(""); };
   const removeAmenity = (idx) => mikvehsCtl.updateMikveh(mikveh.id, { amenities: (mikveh.amenities || []).filter((_, i) => i !== idx) });
   const setHourDay = (dayIdx, value) => { const next = hours.map((d, i) => i === dayIdx ? { ...d, hours: value } : d); mikvehsCtl.updateMikveh(mikveh.id, { hours: next }); };
+  const setHourZman = (dayIdx, zmanPartial) => {
+    const next = hours.map((d, i) => {
+      if (i !== dayIdx) return d;
+      if (zmanPartial === null) { const { zman, ...rest } = d; return rest; }
+      return { ...d, zman: { anchor: "sunset", offsetMin: -30, durationMin: 120, ...(d.zman || {}), ...zmanPartial } };
+    });
+    mikvehsCtl.updateMikveh(mikveh.id, { hours: next });
+  };
   const pairingUrl = `${window.location.origin}${window.location.pathname}#/kiosk-setup/${mikveh.id}/${mikveh.setupToken}`;
   const copyPairing = async () => { try { await navigator.clipboard.writeText(pairingUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (e) {} };
 
@@ -2114,7 +2212,6 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
               <Field label="קישור משוב"><input style={inputStyle} value={form.feedbackUrl} onChange={(e) => setForm({ ...form, feedbackUrl: e.target.value })} placeholder="https://..." /></Field>
             </div>
             <Field label="הודעה קבועה לדף הבית"><input style={inputStyle} value={form.pinnedNote} onChange={(e) => setForm({ ...form, pinnedNote: e.target.value })} placeholder='לדוגמה: "בשיפוצים"' /></Field>
-            <div style={{ marginTop: 10 }}><ToggleRow label="נגישות לנכים (מעלון)" checked={!!mikveh.accessible} onChange={(v) => mikvehsCtl.updateMikveh(mikveh.id, { accessible: v })} /></div>
           </SectionToggle>
 
           <SectionToggle title="הערות ומידע לציבור" icon={StickyNote}>
@@ -2137,13 +2234,52 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
           </SectionToggle>
 
           <SectionToggle title="שעות פתיחה שבועיות" icon={Clock}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-              {hours.map((d, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ width: 48, fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{d.day}</span>
-                  <input style={{ ...inputStyle, flex: 1 }} value={d.hours} onChange={(e) => setHourDay(i, e.target.value)} />
-                </div>
-              ))}
+            <p style={{ fontSize: 12, color: "#7a8f8d", margin: "0 0 10px" }}>
+              ניתן לקבוע שעות קבועות בכתב, או שעות יחסיות לזמן הלכתי (למשל "חצי שעה לפני השקיעה למשך שעתיים") שיחושבו אוטומטית כל יום.
+              בחגים (ראש השנה, סוכות, שמיני עצרת/שמחת תורה, פסח, שבועות) יחולו אוטומטית שעות יום שבת.
+              אם החישוב ההלכתי נכשל מכל סיבה — תוצג במקומו השעה הקבועה שמוגדרת כאן.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {hours.map((d, i) => {
+                const isZman = !!d.zman;
+                const previewDate = new Date();
+                previewDate.setDate(previewDate.getDate() + ((i - previewDate.getDay() + 7) % 7));
+                return (
+                  <div key={i} style={{ background: COLORS.seafoam, borderRadius: 10, padding: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: isZman ? 8 : 0 }}>
+                      <span style={{ width: 44, fontSize: 13, fontWeight: 700, flexShrink: 0 }}>{d.day}</span>
+                      <input style={{ ...inputStyle, flex: 1, background: "#fff" }} value={d.hours} onChange={(e) => setHourDay(i, e.target.value)}
+                        placeholder={isZman ? "טקסט גיבוי אם החישוב ההלכתי נכשל…" : ""} />
+                      <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: COLORS.teal, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>
+                        <input type="checkbox" checked={isZman} onChange={(e) => setHourZman(i, e.target.checked ? {} : null)} />
+                        זמן הלכתי
+                      </label>
+                    </div>
+                    {isZman && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", paddingRight: 54 }}>
+                        <select style={{ ...inputStyle, width: 130, background: "#fff" }} value={d.zman.anchor || "sunset"} onChange={(e) => setHourZman(i, { anchor: e.target.value })}>
+                          <option value="sunset">שקיעה</option>
+                          <option value="tzeit">צאת הכוכבים</option>
+                        </select>
+                        <select style={{ ...inputStyle, width: 80, background: "#fff" }} value={(d.zman.offsetMin || 0) < 0 ? "before" : "after"}
+                          onChange={(e) => { const mins = Math.abs(d.zman.offsetMin || 0); setHourZman(i, { offsetMin: e.target.value === "before" ? -mins : mins }); }}>
+                          <option value="before">לפני</option>
+                          <option value="after">אחרי</option>
+                        </select>
+                        <input type="number" min="0" style={{ ...inputStyle, width: 70, background: "#fff" }} value={Math.abs(d.zman.offsetMin || 0)}
+                          onChange={(e) => { const mins = Math.max(0, parseInt(e.target.value) || 0); const sign = (d.zman.offsetMin || 0) < 0 ? -1 : 1; setHourZman(i, { offsetMin: sign * mins }); }} />
+                        <span style={{ fontSize: 12.5, color: "#7a8f8d" }}>דקות · למשך</span>
+                        <input type="number" min="0" style={{ ...inputStyle, width: 70, background: "#fff" }} value={d.zman.durationMin ?? 120}
+                          onChange={(e) => setHourZman(i, { durationMin: Math.max(0, parseInt(e.target.value) || 0) })} />
+                        <span style={{ fontSize: 12.5, color: "#7a8f8d" }}>דקות</span>
+                        <span style={{ fontSize: 12, color: COLORS.teal, fontWeight: 700, marginRight: "auto" }}>
+                          לדוגמה: {resolveDayHours(d, previewDate)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </SectionToggle>
 
@@ -3115,11 +3251,12 @@ function PublicMikvehDetail({ mikveh }) {
   const today = todayStr();
   const weekday = new Date().getDay();
   const hours = mikveh.hours || OPENING_HOURS;
-  const todaysHours = (hours[weekday] || {}).hours || "לא הוגדר";
+  const { config: dayConfig, holidayName } = getEffectiveDayConfig(mikveh, new Date());
+  const todaysHours = resolveDayHours(dayConfig, new Date());
   const isOpenDay = todaysHours !== "סגור";
   const [expanded, setExpanded] = useState(false);
 
-  const { shifts: tonightShifts, names: tonightNames, isActual: tonightIsActual } = tonightStaff(data, weekday, today);
+  const { shifts: tonightShifts, names: tonightNames } = tonightStaff(data, weekday, today);
   const load = estimateLoad(data.dippersLog, mikveh, today, mikveh.manualLoad);
   const todayRec = data.checklist[today];
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
@@ -3153,20 +3290,19 @@ function PublicMikvehDetail({ mikveh }) {
             )}
           </div>
           <h1 className="font-display" style={{ margin: "0 0 6px", fontSize: 26 }}>{mikveh.name}</h1>
-          <p style={{ margin: "0 0 6px", opacity: 0.95, fontSize: 15 }}>שעות פתיחה היום ({WEEKDAYS_HE[weekday]}): <b>{todaysHours}</b></p>
+          <p style={{ margin: "0 0 6px", opacity: 0.95, fontSize: 15 }}>שעות פתיחה היום ({WEEKDAYS_HE[weekday]}): <b>{todaysHours}</b>{holidayName && <span style={{ opacity: 0.85, fontSize: 12.5 }}> · שעות שבת ({holidayName})</span>}</p>
           {tonightShifts.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
               {tonightShifts.map((s, i) => (
                 <p key={i} style={{ margin: 0, opacity: 0.9, fontSize: 14 }}>
                   {i === 0 ? "בלנית הערב: " : <span style={{ opacity: 0 }}>בלנית הערב: </span>}
-                  <b>{s.name}</b>
+                  <b style={{ color: s.isActual ? "#fff" : "#FFE7A0" }}>{s.name}</b>
                   {s.start ? <> · {s.start}–{s.end || "?"}</> : ""}
-                  {!tonightIsActual && <span style={{ opacity: 0.7, fontSize: 12 }}> (משובצת)</span>}
                 </p>
               ))}
             </div>
           )}
-          <p style={{ marginTop: 4, opacity: 0.9, fontSize: 13 }}>{mikveh.address}{mikveh.phone && <> · {mikveh.phone}</>}</p>
+          <p style={{ marginTop: 4, opacity: 0.9, fontSize: 13 }}>{mikveh.address}{mikveh.phone && <> · <a href={`tel:${mikveh.phone}`} style={{ color: "#fff", textDecoration: "underline" }}>{mikveh.phone}</a></>}</p>
           {(mikveh.pinnedNote || todayRec?.dailyNote) && (
             <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
               {mikveh.pinnedNote && (
@@ -3226,7 +3362,11 @@ function PublicMikvehDetail({ mikveh }) {
             </div>
           )}
           <Card title="שעות פתיחה שבועיות" icon={Clock}>
-            <Table headers={["יום", "שעות"]} rows={hours.map((d) => [d.day, d.hours])} empty="" />
+            <Table headers={["יום", "שעות"]} rows={hours.map((d, i) => {
+              const target = new Date();
+              target.setDate(target.getDate() + ((i - target.getDay() + 7) % 7));
+              return [d.day, resolveDayHours(d, target)];
+            })} empty="" />
           </Card>
           {(mikveh.photos || []).length > 0 && <PublicMikvehDetailPhotos photos={mikveh.photos} />}
           <PublicMikvehDetailExtras mikveh={mikveh} />
@@ -3278,13 +3418,10 @@ function PublicMikvehDetailExtras({ mikveh }) {
           <p style={{ fontSize: 14, lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap" }}>{mikveh.notes}</p>
         </Card>
       )}
-      {(mikveh.accessible || (mikveh.amenities || []).length > 0) && (
+      {(mikveh.amenities || []).length > 0 && (
         <Card title="נגישות ומוצרים במקום" icon={Accessibility}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {[
-              mikveh.accessible ? "מעלון נגיש לבעלות מוגבלות" : null,
-              ...(mikveh.amenities || []),
-            ].filter(Boolean).map((f, i) => (
+            {(mikveh.amenities || []).map((f, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 9 }}>
                 <Check size={16} color={COLORS.aqua} /><span style={{ fontSize: 14 }}>{f}</span>
               </div>
