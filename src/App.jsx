@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { storage } from "./storage";
 import { signInWithGoogle, signOutUser, subscribeAuth, ensureAnonymousAuth } from "./auth";
 import { getZmanim, getSpecialDayInfo, formatHM } from "./zmanim";
+import { addToHomeScreen, isMobileDevice, isRunningStandalone } from "./pwa";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend
@@ -170,10 +171,17 @@ function getEffectiveDayConfig(mikveh, date) {
   return { config: hours[date.getDay()], holidayName: null };
 }
 
+// מעגל זמן (Date) לחמש הדקות הקרובות — למשל 08:31 → 08:30, ו-09:34 → 09:35.
+function roundToNearest5Min(date) {
+  const ms5 = 5 * 60 * 1000;
+  return new Date(Math.round(date.getTime() / ms5) * ms5);
+}
+
 // הופך תצורת יום (טקסט חופשי, או כלל יחסי לזמן הלכתי) למחרוזת שעות להצגה.
-// אם מוגדר כלל יחסי לזמן הלכתי (zman) — מנסה לחשב בפועל; בכל כשל (ספרייה לא
-// נטענה, זמן לא תקין וכו') נופל בבטחה חזרה לטקסט החופשי שהוגדר בניהול (או
-// "לא הוגדר" אם גם הוא ריק) — כדי שהתצוגה לעולם לא תישבר.
+// אם מוגדר כלל יחסי לזמן הלכתי (zman) — מנסה לחשב בפועל ומעגל לחמש הדקות
+// הקרובות; בכל כשל (ספרייה לא נטענה, זמן לא תקין וכו') נופל בבטחה חזרה
+// לטקסט החופשי שהוגדר בניהול (או "לא הוגדר" אם גם הוא ריק) — כדי שהתצוגה
+// לעולם לא תישבר.
 function resolveDayHours(dayConfig, date) {
   if (!dayConfig) return "לא הוגדר";
   if (!dayConfig.zman) return dayConfig.hours || "לא הוגדר";
@@ -181,14 +189,61 @@ function resolveDayHours(dayConfig, date) {
     const z = getZmanim(date);
     const anchor = dayConfig.zman.anchor === "tzeit" ? z.tzeit : z.sunset;
     if (!anchor || isNaN(anchor.getTime())) throw new Error("זמן הלכתי לא תקין");
-    const start = new Date(anchor.getTime() + (Number(dayConfig.zman.offsetMin) || 0) * 60000);
-    const end = new Date(start.getTime() + (Number(dayConfig.zman.durationMin) || 120) * 60000);
+    const start = roundToNearest5Min(new Date(anchor.getTime() + (Number(dayConfig.zman.offsetMin) || 0) * 60000));
+    const end = roundToNearest5Min(new Date(start.getTime() + (Number(dayConfig.zman.durationMin) || 120) * 60000));
     return `${formatHM(start)}–${formatHM(end)}`;
   } catch (e) {
     return dayConfig.hours || "לא הוגדר";
   }
 }
 
+const ZMAN_ANCHOR_LABELS = { sunset: "שקיעה", tzeit: "צאת הכוכבים" };
+
+// הופך מספר דקות לניסוח עברי טבעי עם קידומת "כ" (משמעה "בקירוב") — למשל
+// "כחצי שעה", "כשעתיים", ולמספרים לא עגולים "כ-X דקות".
+function approxMinutesText(mins) {
+  if (mins === 30) return "כחצי שעה";
+  if (mins === 60) return "כשעה";
+  if (mins === 90) return "כשעה וחצי";
+  if (mins === 120) return "כשעתיים";
+  if (mins > 0 && mins % 60 === 0) return `כ-${mins / 60} שעות`;
+  return `כ-${mins} דקות`;
+}
+
+// מנסח במילים איך נקבעה שעת הפתיחה של יום שהוגדר כ"זמן הלכתי" — לתצוגה
+// באייקון המידע ליד השעות. מחזיר null אם היום לא מוגדר כזמן הלכתי.
+function describeZmanRule(dayConfig) {
+  if (!dayConfig || !dayConfig.zman) return null;
+  const { anchor, offsetMin, durationMin } = dayConfig.zman;
+  const anchorLabel = ZMAN_ANCHOR_LABELS[anchor] || "שקיעה";
+  const mins = Math.abs(offsetMin || 0);
+  const offsetText = mins === 0 ? `בדיוק ב${anchorLabel}` : `${approxMinutesText(mins)} ${(offsetMin || 0) < 0 ? "לפני" : "אחרי"} ${anchorLabel}`;
+  return `נקבע לפי: ${offsetText}, למשך ${approxMinutesText(durationMin ?? 120)} (השעות מעוגלות לחמש הדקות הקרובות).`;
+}
+
+// אייקון מידע קטן שבלחיצה מציג הסבר (למשל, לפי מה נקבעה שעת פתיחה
+// המבוססת על זמן הלכתי). אם אין טקסט להצגה — לא מרנדר כלום.
+function ZmanInfoIcon({ text }) {
+  const [open, setOpen] = useState(false);
+  if (!text) return null;
+  return (
+    <span style={{ position: "relative", display: "inline-block", verticalAlign: "middle", marginRight: 5 }}>
+      <button type="button" onClick={() => setOpen((x) => !x)} aria-label="פרטי חישוב השעה"
+        style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", verticalAlign: "middle", color: "inherit", opacity: 0.85 }}>
+        <Info size={14} />
+      </button>
+      {open && (
+        <div onClick={() => setOpen(false)} style={{
+          position: "absolute", bottom: "130%", right: 0, zIndex: 30, width: 200,
+          background: COLORS.ink, color: "#fff", fontSize: 11.5, fontWeight: 500,
+          borderRadius: 8, padding: "8px 10px", boxShadow: "0 4px 14px #0005", lineHeight: 1.4, cursor: "pointer",
+        }}>
+          {text}
+        </div>
+      )}
+    </span>
+  );
+}
 
 const DEFAULT_MIKVEHS = [
   { id: "m1", name: "מקווה מרכזי", address: "רח' הרצל 12", phone: "", notes: "", amenities: ["חדרי הכנה מרווחים", "ערכות בלנית וחומרי טיפוח למכירה", "חניה נגישה בסמוך לכניסה"], bookingEnabled: false, photoUrl: "", photos: [], pinnedNote: "", roomsCount: 3, bathRooms: 2, showerRooms: 1, price: "25", paymentUrl: "", manualLoad: null, feedbackUrl: "", hours: OPENING_HOURS.map((d) => ({ ...d })), setupToken: uid() },
@@ -347,6 +402,22 @@ function WaveDivider({ color = COLORS.aqua, opacity = 0.35 }) {
   );
 }
 
+// כפתור "הוספה למסך הבית" — מוצג רק במובייל וכל עוד האפליקציה לא כבר
+// מותקנת/פועלת כ-PWA עצמאי.
+function InstallAppButton() {
+  const [show, setShow] = useState(false);
+  useEffect(() => { setShow(isMobileDevice() && !isRunningStandalone()); }, []);
+  if (!show) return null;
+  return (
+    <button onClick={addToHomeScreen} title="הוספה למסך הבית" style={{
+      display: "flex", alignItems: "center", gap: 6, background: "#ffffff17", border: "none",
+      borderRadius: 9, padding: "8px 12px", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer",
+    }}>
+      <Smartphone size={15} /> הוספה למסך הבית
+    </button>
+  );
+}
+
 function TopBar({ route, navigate }) {
   const tabs = [
     { id: "kiosk", label: "התחברות לבלניות", icon: Droplets },
@@ -359,7 +430,9 @@ function TopBar({ route, navigate }) {
           <img src={`${import.meta.env.BASE_URL}logo.png`} alt="לוגו המועצה" style={{ height: 38, width: "auto", display: "block" }} />
           <span className="font-display" style={{ color: "#fff", fontWeight: 800, fontSize: 19 }}>מקוואות בית אל</span>
         </button>
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", background: "#ffffff17", padding: 4, borderRadius: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <InstallAppButton />
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", background: "#ffffff17", padding: 4, borderRadius: 12 }}>
           {tabs.map((t) => {
             const Icon = t.icon;
             const active = route === t.id;
@@ -377,6 +450,7 @@ function TopBar({ route, navigate }) {
               </button>
             );
           })}
+          </div>
         </div>
       </div>
       <div style={{ height: 12, marginTop: 10, background: `linear-gradient(180deg, ${COLORS.teal}, transparent)` }}>
@@ -3354,7 +3428,7 @@ function PublicMikvehDetail({ mikveh }) {
             )}
           </div>
           <h1 className="font-display" style={{ margin: "0 0 6px", fontSize: 26 }}>{mikveh.name}</h1>
-          <p style={{ margin: "0 0 6px", opacity: 0.95, fontSize: 15 }}>שעות פתיחה היום ({WEEKDAYS_HE[weekday]}): <b>{todaysHours}</b>{holidayName && <span style={{ opacity: 0.85, fontSize: 12.5 }}> · שעות שבת ({holidayName})</span>}</p>
+          <p style={{ margin: "0 0 6px", opacity: 0.95, fontSize: 15 }}>שעות פתיחה היום ({WEEKDAYS_HE[weekday]}): <b>{todaysHours}</b><ZmanInfoIcon text={describeZmanRule(dayConfig)} />{holidayName && <span style={{ opacity: 0.85, fontSize: 12.5 }}> · שעות שבת ({holidayName})</span>}</p>
           {tonightShifts.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
               {tonightShifts.map((s, i) => (
@@ -3429,7 +3503,7 @@ function PublicMikvehDetail({ mikveh }) {
             <Table headers={["יום", "שעות"]} rows={hours.map((d, i) => {
               const target = new Date();
               target.setDate(target.getDate() + ((i - target.getDay() + 7) % 7));
-              return [d.day, resolveDayHours(d, target)];
+              return [d.day, <span key={i}>{resolveDayHours(d, target)}<ZmanInfoIcon text={describeZmanRule(d)} /></span>];
             })} empty="" />
           </Card>
           {(mikveh.photos || []).length > 0 && <PublicMikvehDetailPhotos photos={mikveh.photos} />}
