@@ -441,6 +441,15 @@ function TopBar({ route, navigate }) {
     { id: "kiosk", label: "התחברות לבלניות", icon: Droplets },
     { id: "admin", label: "ניהול ובקרה", icon: ClipboardList },
   ];
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocClick = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [menuOpen]);
+
   return (
     <div style={{ background: COLORS.teal }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "14px 16px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
@@ -448,26 +457,39 @@ function TopBar({ route, navigate }) {
           <img src={`${import.meta.env.BASE_URL}logo.png`} alt="לוגו המועצה" style={{ height: 38, width: "auto", display: "block" }} />
           <span className="font-display" style={{ color: "#fff", fontWeight: 800, fontSize: 19 }}>מקוואות בית אל</span>
         </button>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <InstallAppButton />
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", background: "#ffffff17", padding: 4, borderRadius: 12 }}>
-          {tabs.map((t) => {
-            const Icon = t.icon;
-            const active = route === t.id;
-            return (
-              <button key={t.id} onClick={() => navigate(t.id)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 9,
-                  border: "none", cursor: "pointer", fontSize: 14.5, fontWeight: 600,
-                  background: active ? COLORS.paper : "transparent",
-                  color: active ? COLORS.teal : "#EAF3F1",
-                  transition: "all .15s",
-                }}>
-                <Icon size={16} />
-                {t.label}
-              </button>
-            );
-          })}
+          <div ref={menuRef} style={{ position: "relative" }}>
+            <button onClick={() => setMenuOpen((x) => !x)} title="כניסת בלניות / ניהול" aria-label="כניסת בלניות / ניהול"
+              style={{
+                width: 34, height: 34, borderRadius: "50%", border: "none", cursor: "pointer",
+                background: menuOpen ? "#ffffff33" : "#ffffff17", color: "#fff",
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "background .15s",
+              }}>
+              <Droplets size={16} />
+            </button>
+            {menuOpen && (
+              <div style={{
+                position: "absolute", top: "calc(100% + 8px)", left: 0, zIndex: 50,
+                background: "#fff", borderRadius: 12, boxShadow: "0 8px 30px #00000044", overflow: "hidden", minWidth: 190,
+              }}>
+                {tabs.map((t) => {
+                  const Icon = t.icon;
+                  const active = route === t.id;
+                  return (
+                    <button key={t.id} onClick={() => { navigate(t.id); setMenuOpen(false); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "11px 14px",
+                        border: "none", background: active ? COLORS.aquaLight : "#fff", color: COLORS.ink,
+                        fontSize: 14, fontWeight: 600, cursor: "pointer", textAlign: "right",
+                      }}>
+                      <Icon size={16} color={COLORS.teal} />
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
