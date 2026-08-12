@@ -223,18 +223,36 @@ function describeZmanRule(dayConfig) {
 
 // אייקון מידע קטן שבלחיצה מציג הסבר (למשל, לפי מה נקבעה שעת פתיחה
 // המבוססת על זמן הלכתי). אם אין טקסט להצגה — לא מרנדר כלום.
+// החלונית ממוקמת לפי מיקום האייקון בפועל על המסך (position: fixed) ומוגבלת
+// לגבולות המסך, כדי שלא תיחתך בקצה — בין אם האייקון קרוב לשמאל, לימין,
+// או בתוך כרטיס ברוחב מלא במובייל.
 function ZmanInfoIcon({ text }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
   if (!text) return null;
+
+  const toggle = () => {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      const width = Math.min(220, window.innerWidth - 24);
+      let left = rect.left + rect.width / 2 - width / 2;
+      left = Math.max(12, Math.min(left, window.innerWidth - width - 12));
+      setPos({ left, top: rect.top, width });
+    }
+    setOpen((x) => !x);
+  };
+
   return (
     <span style={{ position: "relative", display: "inline-block", verticalAlign: "middle", marginRight: 5 }}>
-      <button type="button" onClick={() => setOpen((x) => !x)} aria-label="פרטי חישוב השעה"
+      <button ref={btnRef} type="button" onClick={toggle} aria-label="פרטי חישוב השעה"
         style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "inline-flex", verticalAlign: "middle", color: "inherit", opacity: 0.85 }}>
         <Info size={14} />
       </button>
-      {open && (
+      {open && pos && (
         <div onClick={() => setOpen(false)} style={{
-          position: "absolute", bottom: "130%", right: 0, zIndex: 30, width: 200,
+          position: "fixed", left: pos.left, top: pos.top, width: pos.width, transform: "translateY(-100%)",
+          marginTop: -8, zIndex: 200,
           background: COLORS.ink, color: "#fff", fontSize: 11.5, fontWeight: 500,
           borderRadius: 8, padding: "8px 10px", boxShadow: "0 4px 14px #0005", lineHeight: 1.4, cursor: "pointer",
         }}>
