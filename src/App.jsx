@@ -3,6 +3,7 @@ import { storage } from "./storage";
 import { signInWithGoogle, signOutUser, subscribeAuth, ensureAnonymousAuth } from "./auth";
 import { getZmanim, getSpecialDayInfo, formatHM } from "./zmanim";
 import { addToHomeScreen, isMobileDevice, isRunningStandalone } from "./pwa";
+import { uploadMalfunctionPhoto } from "./storageFiles";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend
@@ -92,25 +93,21 @@ function toDirectImageUrl(url) {
    (kiosk / admin / public) reads and writes the same records, which
    is what lets the three roles work together as one live system.
    ============================================================ */
+// טוען מפתח מ-Firestore ומאזין לשינויים בזמן אמת (גם ממכשירים אחרים) —
+// למשל שינוי שבוצע בטאבלט של הבלנית מופיע מיד בניהול ובדף הציבורי, בלי
+// שיהיה צורך לרענן את הדף.
 function useShared(key, initial) {
   const [value, setValue] = useState(initial);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const res = await storage.get(key);
-        if (active && res !== null && res !== undefined) setValue(res);
-      } catch (e) {
-        /* key not found yet — keep initial value */
-      } finally {
-        if (active) setLoaded(true);
-      }
-    })();
-    return () => { active = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setLoaded(false);
+    const unsubscribe = storage.watch(key, (res) => {
+      if (res !== null && res !== undefined) setValue(res);
+      setLoaded(true);
+    });
+    return unsubscribe;
   }, [key]);
 
   const persist = useCallback(async (updater) => {
@@ -226,6 +223,29 @@ function describeZmanRule(dayConfig) {
 // החלונית ממוקמת לפי מיקום האייקון בפועל על המסך (position: fixed) ומוגבלת
 // לגבולות המסך, כדי שלא תיחתך בקצה — בין אם האייקון קרוב לשמאל, לימין,
 // או בתוך כרטיס ברוחב מלא במובייל.
+// משוב מהיר (👍/👎) בכרטיס המקווה בדף הציבורי — בנוסף לקישור המשוב
+// החיצוני (אם מוגדר), לא במקומו. נשמר ל-Firestore לתצוגה מצטברת בדשבורד
+// הניהול. פעם אחת בלבד לכל טעינת דף (state מקומי, לא נשמר בין ביקורים).
+function QuickFeedback({ data }) {
+  const [rated, setRated] = useState(false);
+  if (!data || !data.setFeedback) return null;
+  const rate = (val) => {
+    if (rated) return;
+    setRated(true);
+    data.setFeedback((prev) => [{ id: uid(), ts: new Date().toISOString(), rating: val }, ...prev].slice(0, 2000));
+  };
+  if (rated) return <span style={{ fontSize: 12.5, color: "#fff", opacity: 0.9 }}>תודה על המשוב! 🙏</span>;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <span style={{ fontSize: 12, color: "#fff", opacity: 0.8 }}>איך הביקור?</span>
+      <button onClick={() => rate("up")} title="ביקור טוב" aria-label="ביקור טוב"
+        style={{ width: 32, height: 32, borderRadius: "50%", background: "#ffffff22", border: "none", cursor: "pointer", fontSize: 14 }}>👍</button>
+      <button onClick={() => rate("down")} title="היה משהו לא בסדר" aria-label="היה משהו לא בסדר"
+        style={{ width: 32, height: 32, borderRadius: "50%", background: "#ffffff22", border: "none", cursor: "pointer", fontSize: 14 }}>👎</button>
+    </div>
+  );
+}
+
 function ZmanInfoIcon({ text }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
@@ -345,6 +365,34 @@ function useHashRoute() {
   }, []);
   const navigate = (r) => { window.location.hash = "/" + r; };
   return [route, navigate];
+}
+
+// רשת ביטחון: אם קורית שגיאת JS בלתי-צפויה בזמן רינדור בכל מקום באפליקציה,
+// זה מציג מסך ידידותי עם כפתור רענון במקום שהאפליקציה כולה תיעלם/תיתקע
+// בלי שום הודעה למשתמש.
+export class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error, info) { console.error("שגיאה בלתי צפויה באפליקציה", error, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div dir="rtl" style={{ minHeight: "100vh", width: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "'Assistant', sans-serif", background: "#EEF7FB", textAlign: "center", boxSizing: "border-box" }}>
+          <div style={{ maxWidth: 380 }}>
+            <div style={{ fontSize: 44, marginBottom: 10 }}>💧</div>
+            <h2 style={{ color: "#0B3A52", marginBottom: 8, fontSize: 20 }}>משהו השתבש</h2>
+            <p style={{ color: "#3a5250", fontSize: 14.5, marginBottom: 22, lineHeight: 1.6 }}>
+              קרתה שגיאה בלתי צפויה. בדרך כלל רענון הדף פותר את זה. אם זה חוזר — כדאי לדווח למחלקת דת.
+            </p>
+            <button onClick={() => window.location.reload()} style={{ background: "#12628A", color: "#fff", border: "none", borderRadius: 12, padding: "13px 28px", fontWeight: 700, fontSize: 15.5, cursor: "pointer" }}>
+              רענון הדף
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 export default function MikvehSystem() {
@@ -556,6 +604,7 @@ function useSystemData(mikvehId) {
   const [loginLog, setLoginLog] = useShared(k("login-log"), []);
   const [appointments, setAppointments] = useShared(k("appointments"), []);
   const [defaultSchedule, setDefaultSchedule] = useShared(k("default-schedule"), {});
+  const [feedback, setFeedback] = useShared(k("feedback"), []);
 
   const addAudit = useCallback((staffName, action, details) => {
     setAuditLog((prev) => [{ id: uid(), ts: new Date().toISOString(), staffName, action, details }, ...prev].slice(0, 500));
@@ -573,6 +622,7 @@ function useSystemData(mikvehId) {
     loginLog, setLoginLog,
     appointments, setAppointments,
     defaultSchedule, setDefaultSchedule,
+    feedback, setFeedback,
   };
 }
 
@@ -924,7 +974,7 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
       {tab === "checklist" && <KioskChecklist data={data} staffName={current.name} flash={flash} />}
       {tab === "inventory" && <KioskInventory data={data} staffName={current.name} flash={flash} />}
       {tab === "notes" && <KioskNotes data={data} staffName={current.name} flash={flash} />}
-      {tab === "malfunctions" && <KioskMalfunctions data={data} staffName={current.name} flash={flash} />}
+      {tab === "malfunctions" && <KioskMalfunctions data={data} staffName={current.name} flash={flash} mikvehId={mikveh.id} />}
 
       {/* Transfer shift modal */}
       {shiftModal === "transfer" && (
@@ -1228,17 +1278,17 @@ function KioskChecklist({ data, staffName, flash }) {
     data.setChecklist((prev) => ({ ...prev, [date]: { ...rec, ...patch } }));
   };
 
-  const missingMeasurement = !rec.chlorine || !rec.temp;
+  const missingChlorine = !rec.chlorine;
 
   const confirmOpen = () => {
-    if (missingMeasurement && !rec.skipReason?.trim()) {
-      flash("נא למלא כלור וטמפרטורה, או להסביר בהערה למה לא נמדדו");
+    if (missingChlorine && !rec.skipReason?.trim()) {
+      flash("נא למלא רמת כלור, או להסביר בהערה למה לא נמדד");
       return;
     }
     update({ opened: true, openedBy: staffName, openedAt: new Date().toISOString() });
-    data.addAudit(staffName, "אישור פתיחת משמרת", missingMeasurement
-      ? `נפתח ללא מדידת מים — סיבה: ${rec.skipReason}`
-      : `כלור: ${rec.chlorine} ppm · טמפ׳: ${rec.temp}°`);
+    data.addAudit(staffName, "אישור פתיחת משמרת", missingChlorine
+      ? `נפתח ללא מדידת כלור — סיבה: ${rec.skipReason}`
+      : `כלור: ${rec.chlorine} ppm${rec.temp ? ` · טמפ׳: ${rec.temp}°` : ""}`);
     flash("משמרת נפתחה ✓");
   };
   const confirmClose = () => {
@@ -1258,14 +1308,14 @@ function KioskChecklist({ data, staffName, flash }) {
           <input value={rec.chlorine} onChange={(e) => update({ chlorine: e.target.value })} placeholder="לדוגמה 2.0" style={inputStyle} inputMode="decimal" />
           {chlorineWarn && <div style={{ color: COLORS.red, fontSize: 12, marginTop: 4, fontWeight: 600 }}>⚠ מחוץ לתקן ({OK_RANGE[0]}–{OK_RANGE[1]})</div>}
         </Field>
-        <Field label="טמפרטורת מים (°C)">
+        <Field label="טמפרטורת מים (°C) — לא חובה">
           <input value={rec.temp} onChange={(e) => update({ temp: e.target.value })} placeholder="לדוגמה 38" style={inputStyle} inputMode="decimal" />
         </Field>
       </div>
 
-      {missingMeasurement && (
+      {missingChlorine && (
         <div style={{ marginBottom: 16 }}>
-          <Field label="לא נמדד כלור/טמפרטורה? נא להסביר למה (יתועד ביומן השינויים)">
+          <Field label="לא נמדד כלור? נא להסביר למה (יתועד ביומן השינויים)">
             <textarea value={rec.skipReason || ""} onChange={(e) => update({ skipReason: e.target.value })} style={{ ...inputStyle, minHeight: 56, resize: "vertical" }} placeholder='לדוגמה: "ערכת הבדיקה נגמרה, הוזמנה חדשה"' />
           </Field>
         </div>
@@ -1703,18 +1753,40 @@ const MALFUNCTION_TYPES = [
   "אחר",
 ];
 
-function KioskMalfunctions({ data, staffName, flash }) {
+function KioskMalfunctions({ data, staffName, flash, mikvehId }) {
   const [desc, setDesc] = useState("");
   const [category, setCategory] = useState("");
   const [editId, setEditId] = useState(null);
   const [editDesc, setEditDesc] = useState("");
   const [editCategory, setEditCategory] = useState("");
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [uploading, setUploading] = useState(false);
 
-  const submit = () => {
+  const onPickPhoto = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
+  const clearPhoto = () => { setPhotoFile(null); setPhotoPreview(""); };
+
+  const submit = async () => {
     if (!desc.trim() || !category) { flash("נא לבחור סוג ולתאר את הקריאה"); return; }
-    data.setMalfunctions((prev) => [{ id: uid(), date: todayStr(), staffName, category, description: desc.trim(), status: "פתוח", ts: new Date().toISOString() }, ...prev]);
+    let photoUrl = "";
+    if (photoFile) {
+      setUploading(true);
+      try {
+        photoUrl = await uploadMalfunctionPhoto(mikvehId, photoFile);
+      } catch (e) {
+        console.error("malfunction photo upload failed", e);
+        flash("העלאת התמונה נכשלה — הקריאה נשלחת בלי תמונה");
+      }
+      setUploading(false);
+    }
+    data.setMalfunctions((prev) => [{ id: uid(), date: todayStr(), staffName, category, description: desc.trim(), status: "פתוח", ts: new Date().toISOString(), photoUrl }, ...prev]);
     data.addAudit(staffName, "פתיחת קריאת תקלה", `${category}: ${desc.trim().slice(0, 60)}`);
-    setDesc(""); setCategory("");
+    setDesc(""); setCategory(""); clearPhoto();
     flash("הקריאה נשלחה ✓");
   };
 
@@ -1752,7 +1824,22 @@ function KioskMalfunctions({ data, staffName, flash }) {
           <input value={desc} onChange={(e) => setDesc(e.target.value)} style={inputStyle} placeholder="תארי את הבעיה בקצרה" />
         </Field>
       </div>
-      <button style={btnPrimary} onClick={submit}><Wrench size={16} /> פתיחת קריאה</button>
+      <div style={{ marginBottom: 12 }}>
+        <Field label="תמונה (אופציונלי)">
+          {photoPreview ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <img src={photoPreview} alt="" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 10, border: "1px solid #00000018" }} />
+              <button onClick={clearPhoto} style={{ ...btnGhost, fontSize: 12.5, padding: "6px 10px" }}><X size={13} /> הסרה</button>
+            </div>
+          ) : (
+            <label style={{ ...btnGhost, display: "inline-flex", cursor: "pointer", fontSize: 13.5, padding: "9px 14px" }}>
+              <ImagePlus size={16} /> צילום / העלאת תמונה
+              <input type="file" accept="image/*" capture="environment" onChange={onPickPhoto} style={{ display: "none" }} />
+            </label>
+          )}
+        </Field>
+      </div>
+      <button style={btnPrimary} onClick={submit} disabled={uploading}><Wrench size={16} /> {uploading ? "מעלה תמונה…" : "פתיחת קריאה"}</button>
 
       <div style={{ marginTop: 20, borderTop: "1px solid #00000012", paddingTop: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.teal, marginBottom: 10 }}>קריאות מהמקווה</div>
@@ -1777,6 +1864,11 @@ function KioskMalfunctions({ data, staffName, flash }) {
                 </div>
               ) : (
                 <div style={{ padding: 11, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                  {m.photoUrl && (
+                    <a href={m.photoUrl} target="_blank" rel="noreferrer" style={{ flexShrink: 0 }}>
+                      <img src={m.photoUrl} alt="" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8, border: "1px solid #00000018" }} />
+                    </a>
+                  )}
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 600 }}>{m.category} — {m.description}</div>
                     <div style={{ fontSize: 11.5, color: "#3a5250" }}>{m.staffName} · {fmtDate(m.date)}</div>
@@ -1978,6 +2070,9 @@ function AdminDashboard({ data }) {
   const unresolvedNotes = data.notes.filter((n) => !n.resolved);
   const todayRec = data.checklist[today];
   const shiftStatus = todayRec?.closed ? "המשמרת נסגרה" : todayRec?.opened ? "המשמרת פתוחה" : "המשמרת טרם נפתחה";
+  const recentFeedback = (data.feedback || []).filter((f) => Date.now() - new Date(f.ts).getTime() < 30 * 86400000);
+  const feedbackUp = recentFeedback.filter((f) => f.rating === "up").length;
+  const feedbackDown = recentFeedback.filter((f) => f.rating === "down").length;
 
   // Last 7 days, for the trend chart
   const last7 = Array.from({ length: 7 }, (_, i) => {
@@ -2000,6 +2095,15 @@ function AdminDashboard({ data }) {
         <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: COLORS.teal }}>{shiftStatus}</p>
         {todayRec?.dailyNote && <p style={{ margin: "8px 0 0", fontSize: 13, color: "#7a8f8d" }}>הודעה יומית: {todayRec.dailyNote}</p>}
       </Card>
+
+      {recentFeedback.length > 0 && (
+        <Card title="משוב מהיר מהציבור (30 יום אחרונים)" icon={MessageSquare}>
+          <div style={{ display: "flex", gap: 20 }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.teal }}>👍 {feedbackUp}</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.red }}>👎 {feedbackDown}</span>
+          </div>
+        </Card>
+      )}
 
       <Card title="טובלות ב-7 הימים האחרונים" icon={TrendingUp}>
         <ResponsiveContainer width="100%" height={220}>
@@ -2068,8 +2172,36 @@ function AdminPermissions({ adminEmails, setAdminEmails, mikvehs, authUser }) {
   };
   const removeGuest = (idx) => setKioskEmails((prev) => prev.filter((_, i) => i !== idx));
 
+  const [backingUp, setBackingUp] = useState(false);
+  const downloadBackup = async () => {
+    setBackingUp(true);
+    try {
+      const { keys } = await storage.list("");
+      const entries = await Promise.all(keys.map(async (key) => [key, await storage.get(key).catch(() => null)]));
+      const dump = Object.fromEntries(entries);
+      const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `mikveh-backup-${todayStr()}.json`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("שגיאה בהפקת הגיבוי — נסי שוב");
+    }
+    setBackingUp(false);
+  };
+
   return (
     <>
+      <Card title="גיבוי נתונים" icon={Download}>
+        <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
+          מוריד קובץ JSON יחיד עם כל הנתונים במערכת (כל המקוואות: טובלות, שיבוצים, תקלות, פתקים, מלאי ועוד) — רשת ביטחון למקרה של מחיקה בטעות.
+          מומלץ להוריד גיבוי מדי פעם ולשמור במקום בטוח (למשל תיקייה ב-Google Drive).
+        </p>
+        <button style={btnPrimary} onClick={downloadBackup} disabled={backingUp}>
+          <Download size={16} /> {backingUp ? "מכינה גיבוי…" : "הורדת גיבוי מלא"}
+        </button>
+      </Card>
+
       <Card title="מנהלים מאושרים" icon={ShieldCheck}>
         <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
           חשבונות Google ברשימה הזו יכולים להיכנס לממשק "ניהול ובקרה".
@@ -3202,9 +3334,16 @@ function AdminTickets({ data }) {
           {data.malfunctions.length === 0 && <Empty text="אין קריאות תקלה." />}
           {data.malfunctions.map((m) => (
             <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 13, borderRadius: 11, border: "1px solid #00000012", flexWrap: "wrap", gap: 10 }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{m.category} — {m.description}</div>
-                <div style={{ fontSize: 12, color: "#3a5250" }}>{m.staffName} · {fmtDate(m.date)}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {m.photoUrl && (
+                  <a href={m.photoUrl} target="_blank" rel="noreferrer" style={{ flexShrink: 0 }}>
+                    <img src={m.photoUrl} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, border: "1px solid #00000018" }} />
+                  </a>
+                )}
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{m.category} — {m.description}</div>
+                  <div style={{ fontSize: 12, color: "#3a5250" }}>{m.staffName} · {fmtDate(m.date)}</div>
+                </div>
               </div>
               <select value={m.status} onChange={(e) => setStatus(m.id, e.target.value)} style={{ ...inputStyle, width: 130, padding: "7px 10px" }}>
                 {["פתוח", "בטיפול", "טופל"].map((s) => <option key={s}>{s}</option>)}
@@ -3397,23 +3536,19 @@ function tonightStaff(data, weekday, today) {
   const todayRec = data.checklist[today];
   const shiftClosed = !!(todayRec && todayRec.closed);
 
-  // Only use actual logins when the shift is currently open
+  // Only use actual logins when the shift is currently open — show ONLY the
+  // bulanit who is actually logged in right now (the most recent login for
+  // today), with no time range, even though the general schedule below has
+  // time slots. loginLog is newest-first, so the first match is "now".
   if (!shiftClosed) {
-    const actual = data.loginLog.filter((l) => l.ts.slice(0, 10) === today);
-    const scheduled = scheduleShifts(data.defaultSchedule, weekday, today);
-    if (actual.length) {
-      const shifts = actual.map((l) => {
-        const match = scheduled.find((s) => {
-          const st = data.staff.find((x) => x.id === s.staffId);
-          return st && st.name === l.staffName;
-        });
-        return { name: l.staffName, start: match?.start || "", end: match?.end || "", isActual: true };
-      });
-      return { shifts, names: shifts.map((s) => s.name), isActual: true };
+    const actualToday = data.loginLog.filter((l) => l.ts.slice(0, 10) === today);
+    if (actualToday.length) {
+      const shift = { name: actualToday[0].staffName, start: "", end: "", isActual: true };
+      return { shifts: [shift], names: [shift.name], isActual: true };
     }
   }
 
-  // Shift closed or no actual login yet — show scheduled/default
+  // Shift closed or no actual login yet — show scheduled/default (with times)
   const scheduled = scheduleShifts(data.defaultSchedule, weekday, today);
   const shifts = scheduled.map((s) => {
     const st = data.staff.find((x) => x.id === s.staffId);
@@ -3471,13 +3606,16 @@ function PublicMikvehDetail({ mikveh }) {
           <p style={{ margin: "0 0 6px", opacity: 0.95, fontSize: 15 }}>שעות פתיחה היום ({WEEKDAYS_HE[weekday]}): <b>{todaysHours}</b><ZmanInfoIcon text={describeZmanRule(dayConfig)} />{holidayName && <span style={{ opacity: 0.85, fontSize: 12.5 }}> · שעות שבת ({holidayName})</span>}</p>
           {tonightShifts.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              {tonightShifts.map((s, i) => (
-                <p key={i} style={{ margin: 0, opacity: 0.9, fontSize: 14 }}>
-                  {i === 0 ? "בלנית הערב: " : <span style={{ opacity: 0 }}>בלנית הערב: </span>}
-                  <b style={{ color: s.isActual ? "#fff" : "#FFE7A0" }}>{s.name}</b>
-                  {s.start ? <> · {s.start}–{s.end || "?"}</> : ""}
-                </p>
-              ))}
+              {tonightShifts.map((s, i) => {
+                const label = s.isActual ? "הבלנית כעת: " : "בלנית הערב: ";
+                return (
+                  <p key={i} style={{ margin: 0, opacity: 0.9, fontSize: 14 }}>
+                    {i === 0 ? label : <span style={{ opacity: 0 }}>{label}</span>}
+                    <b style={{ color: s.isActual ? "#fff" : "#FFE7A0" }}>{s.name}</b>
+                    {s.start ? <> · {s.start}–{s.end || "?"}</> : ""}
+                  </p>
+                );
+              })}
             </div>
           )}
           <p style={{ marginTop: 4, opacity: 0.9, fontSize: 13 }}>{mikveh.address}{mikveh.phone && <> · <a href={`tel:${mikveh.phone}`} style={{ color: "#fff", textDecoration: "underline" }}>{mikveh.phone}</a></>}</p>
@@ -3511,6 +3649,8 @@ function PublicMikvehDetail({ mikveh }) {
             <button onClick={() => setExpanded((x) => !x)} style={{ ...btnBase("#ffffff22", "#fff") }}>
               {expanded ? "הסתרת פרטים" : "עוד פרטים"} <ChevronRight size={14} style={{ transform: expanded ? "rotate(90deg)" : "rotate(-90deg)", transition: "transform .15s" }} />
             </button>
+            <span style={{ marginRight: "auto" }} />
+            <QuickFeedback data={data} />
           </div>
         </div>
       </div>
