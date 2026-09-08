@@ -6,7 +6,7 @@
 // had to change.
 import { initializeApp, getApps } from "firebase/app";
 import {
-  getFirestore, doc, getDoc, setDoc, deleteDoc,
+  getFirestore, doc, getDoc, setDoc, deleteDoc, onSnapshot,
   collection, getDocs, query, where, orderBy, documentId,
 } from "firebase/firestore";
 import { firebaseConfig } from "./firebaseConfig";
@@ -42,5 +42,16 @@ export const storage = {
       : query(col);
     const snap = await getDocs(q);
     return { keys: snap.docs.map((d) => d.id) };
+  },
+
+  // מאזין בזמן אמת למפתח נתון — קורא ל-onChange(value, exists) בכל שינוי
+  // (כולל הקריאה הראשונית), גם אם השינוי בוצע ממכשיר אחר. מחזיר פונקציית
+  // ביטול-האזנה (unsubscribe) שיש לקרוא לה כשמפסיקים להזדקק לעדכונים.
+  watch(key, onChange) {
+    return onSnapshot(doc(db, COLLECTION, key), (snap) => {
+      onChange(snap.exists() ? snap.data().value : null, snap.exists());
+    }, (err) => {
+      console.error(`storage.watch(${key}) error`, err);
+    });
   },
 };
