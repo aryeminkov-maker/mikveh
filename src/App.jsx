@@ -822,6 +822,7 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
   const [toast, setToast] = useState(null);
   const [shiftModal, setShiftModal] = useState(null); // null | "close" | "transfer"
   const [transferTo, setTransferTo] = useState("");
+  const [transferPin, setTransferPin] = useState("");
   const [pendingLogin, setPendingLogin] = useState(null); // { staffMember, conflictName } — awaiting takeover confirmation
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2600); };
@@ -880,15 +881,21 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
     setShiftModal("summary");
   };
 
+  const transferTargetStaff = data.staff.find((s) => s.id === transferTo);
+
   const transferShift = () => {
     if (!transferTo) return;
     const nextStaff = data.staff.find((s) => s.id === transferTo);
     if (!nextStaff) return;
+    if (!nextStaff.pin) { flash(`לא הוגדר קוד אישי ל${nextStaff.name} — יש להגדיר קוד בניהול לפני העברת משמרת אליה`); return; }
+    if (transferPin !== nextStaff.pin) { flash("קוד שגוי — נסי שוב"); return; }
     data.addAudit(current.name, "העברת משמרת", `הועברה ל${nextStaff.name}`);
+    // חותמת הזמן היא רגע ההעברה בפועל — כך ש"שעת הכניסה" של הבלנית השנייה
+    // תמיד תשקף מתי היא בפועל נכנסה, לא שעת שיבוץ תיאורטית.
     data.setLoginLog((prev) => [{ id: uid(), staffId: nextStaff.id, staffName: nextStaff.name, ts: new Date().toISOString() }, ...prev].slice(0, 400));
     setCurrent(nextStaff);
     setShiftModal(null);
-    setTransferTo("");
+    setTransferTo(""); setTransferPin("");
     flash(`המשמרת הועברה ל${nextStaff.name} ✓`);
   };
 
@@ -979,19 +986,28 @@ function KioskShell({ mikveh, presetStaffName, personalPhone, onLeaveDevice }) {
 
       {/* Transfer shift modal */}
       {shiftModal === "transfer" && (
-        <KioskModal onClose={() => setShiftModal(null)}>
+        <KioskModal onClose={() => { setShiftModal(null); setTransferPin(""); }}>
           <Users size={26} color={COLORS.teal} style={{ marginBottom: 8 }} />
           <div className="font-display" style={{ fontWeight: 700, fontSize: 18, marginBottom: 6 }}>העברת משמרת</div>
           <p style={{ fontSize: 13.5, color: "#3a5250", marginBottom: 14 }}>בחרי את הבלנית שמחליפה. מספר הטובלות שנרשמו ממשיך להצטבר.</p>
-          <select style={{ ...inputStyle, marginBottom: 14, width: "100%" }} value={transferTo} onChange={(e) => setTransferTo(e.target.value)}>
+          <select style={{ ...inputStyle, marginBottom: 14, width: "100%" }} value={transferTo} onChange={(e) => { setTransferTo(e.target.value); setTransferPin(""); }}>
             <option value="">בחרי בלנית…</option>
             {data.staff.filter((s) => s.id !== current.id).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
+          {transferTo && (
+            <div style={{ marginBottom: 14 }}>
+              <Field label={`קוד אישי של ${transferTargetStaff?.name || ""} (לאימות שהיא זו שמחליפה)`}>
+                <input type="password" inputMode="numeric" maxLength={4} value={transferPin}
+                  onChange={(e) => setTransferPin(e.target.value.replace(/\D/g, ""))}
+                  style={{ ...inputStyle, textAlign: "center", letterSpacing: 6, fontSize: 20 }} placeholder="••••" />
+              </Field>
+            </div>
+          )}
           <div style={{ display: "flex", gap: 10 }}>
-            <button style={{ ...btnPrimary, flex: 1, justifyContent: "center", opacity: transferTo ? 1 : 0.4 }} onClick={transferShift} disabled={!transferTo}>
+            <button style={{ ...btnPrimary, flex: 1, justifyContent: "center", opacity: (transferTo && transferPin.length === 4) ? 1 : 0.4 }} onClick={transferShift} disabled={!transferTo || transferPin.length !== 4}>
               <Check size={16} /> העברה
             </button>
-            <button style={btnGhost} onClick={() => setShiftModal(null)}>ביטול</button>
+            <button style={btnGhost} onClick={() => { setShiftModal(null); setTransferPin(""); }}>ביטול</button>
           </div>
         </KioskModal>
       )}
@@ -1818,6 +1834,8 @@ function KioskMalfunctions({ data, staffName, flash, mikvehId }) {
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [showFixInfo, setShowFixInfo] = useState(false);
+  const ELI_BOT_WHATSAPP_URL = `https://wa.me/972525158778?text=${encodeURIComponent("אני מעוניינת לדווח על תקלה במקווה")}`;
 
   const onPickPhoto = (e) => {
     const file = e.target.files?.[0];
@@ -1862,7 +1880,21 @@ function KioskMalfunctions({ data, staffName, flash, mikvehId }) {
   const statusColor = { "פתוח": COLORS.red, "בטיפול": COLORS.gold, "טופל": COLORS.aqua };
 
   return (
-    <Card title="דיווח תקלות וקריאות שירות" icon={Wrench}>
+    <Card title="דיווח תקלות וקריאות שירות" icon={Wrench}
+      right={<button onClick={() => setShowFixInfo(true)} style={{ ...btnGhost, fontSize: 12.5, padding: "7px 12px" }}><Wrench size={13} /> תיקון תקלות</button>}>
+      {showFixInfo && (
+        <KioskModal onClose={() => setShowFixInfo(false)}>
+          <Wrench size={26} color={COLORS.teal} style={{ marginBottom: 8 }} />
+          <div className="font-display" style={{ fontWeight: 700, fontSize: 18, marginBottom: 10 }}>תיקון תקלות</div>
+          <p style={{ fontSize: 14, color: "#3a5250", marginBottom: 20, lineHeight: 1.7 }}>
+            בתקלה הדורשת טיפול של מחלקת שפ״ע וכדו' — יש לפתוח קריאה דרך אלי הבוט.
+          </p>
+          <a href={ELI_BOT_WHATSAPP_URL} target="_blank" rel="noreferrer"
+            style={{ ...btnPrimary, width: "100%", justifyContent: "center", textDecoration: "none", background: "#25D366" }}>
+            <MessageSquare size={17} /> פתיחת קריאה בווטסאפ
+          </a>
+        </KioskModal>
+      )}
       <div style={{ marginBottom: 12 }}>
         <Field label="סוג קריאה">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
