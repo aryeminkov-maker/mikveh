@@ -664,7 +664,8 @@ function KioskApp({ mikvehs, mikvehsCtl }) {
   const deviceMikveh = mikvehs.find((m) => m.id === deviceMikvehId);
 
   const enrichMikveh = (m) => mikvehsCtl
-    ? { ...m, onManualLoad: (level) => mikvehsCtl.updateMikveh(m.id, { manualLoad: level }) }
+    ? { ...m, onManualLoad: (level) => mikvehsCtl.updateMikveh(m.id, { manualLoad: level }),
+        onNameOverride: (name) => mikvehsCtl.updateMikveh(m.id, { publicNameOverride: name }) }
     : m;
 
   // --- Path A: this device was permanently paired to one mikveh (tablet) ---
@@ -1193,7 +1194,62 @@ function KioskDippersWithStatus({ data, mikveh, navigate, flash, staffName }) {
         <ManualLoadPicker load={load} onManualLoad={mikveh.onManualLoad} />
       </div>
       <KioskDippers data={data} staffName={staffName} flash={flash} mikveh={mikveh} />
+
+      <PublicPreviewPanel data={data} mikveh={mikveh} />
     </>
+  );
+}
+
+// פאנל בתחתית מסך "טובלות" בטאבלט — מראה לבלנית בדיוק מה מוצג כרגע לציבור
+// בדף הבית (עומס + שם הבלנית), עם כפתור רענון ידני, ואפשרות לשנות ידנית
+// את שם הבלנית המוצג (למקרה שמישהי אחרת בפועל נמצאת ולא מי שהמערכת זיהתה).
+function PublicPreviewPanel({ data, mikveh }) {
+  const [tick, setTick] = useState(0);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const today = todayStr();
+  const weekday = new Date().getDay();
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const load = useMemo(() => estimateLoad(data.dippersLog, mikveh, today, mikveh.manualLoad), [data.dippersLog, mikveh, today, tick]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const { shifts } = useMemo(() => tonightStaff(data, weekday, today, mikveh.publicNameOverride), [data, weekday, today, tick]);
+  const displayedName = shifts[0]?.name || "—";
+
+  const startEdit = () => { setNameInput(mikveh.publicNameOverride || displayedName === "—" ? "" : displayedName); setEditingName(true); };
+  const saveName = () => { mikveh.onNameOverride?.(nameInput.trim()); setEditingName(false); };
+  const resetName = () => { mikveh.onNameOverride?.(null); setEditingName(false); };
+
+  return (
+    <div style={{ background: COLORS.ink, borderRadius: 16, padding: 16, marginTop: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <span style={{ color: "#fff", fontWeight: 700, fontSize: 13.5 }}>👁 כך זה מוצג לטובלות עכשיו בדף הבית</span>
+        <button onClick={() => setTick((t) => t + 1)} style={{ ...btnGhost, color: "#fff", borderColor: "#ffffff44", fontSize: 12, padding: "5px 10px" }}>
+          <RefreshCw size={13} /> רענון
+        </button>
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <LoadBadge load={load} inline />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ color: "#EAF3F1", fontSize: 13.5 }}>
+          בלנית מוצגת: <b style={{ color: "#fff" }}>{displayedName}</b>
+          {mikveh.publicNameOverride && <span style={{ fontSize: 11, color: COLORS.gold }}> (שונה ידנית)</span>}
+        </span>
+        {!editingName ? (
+          <button onClick={startEdit} style={{ ...btnGhost, color: "#fff", borderColor: "#ffffff44", fontSize: 12, padding: "5px 10px" }}>שינוי שם</button>
+        ) : (
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input value={nameInput} onChange={(e) => setNameInput(e.target.value)} style={{ ...inputStyle, width: 140, padding: "6px 9px" }} placeholder="שם לתצוגה" />
+            <button onClick={saveName} style={{ ...btnPrimary, fontSize: 12, padding: "6px 10px" }}>שמירה</button>
+            <button onClick={() => setEditingName(false)} style={{ ...btnGhost, color: "#fff", borderColor: "#ffffff44", fontSize: 12, padding: "6px 10px" }}>ביטול</button>
+          </div>
+        )}
+        {mikveh.publicNameOverride && !editingName && (
+          <button onClick={resetName} style={{ ...btnGhost, color: "#fff", borderColor: "#ffffff44", fontSize: 12, padding: "5px 10px" }}>איפוס לאוטומטי</button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -2324,7 +2380,7 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
   const { config: todayDayConfig, holidayName: todayHolidayName } = getEffectiveDayConfig(mikveh, new Date());
   const todaysHours = resolveDayHours(todayDayConfig, new Date());
   const isOpenNow = !!(data.checklist[today]?.opened && !data.checklist[today]?.closed);
-  const { names: tonightNames } = tonightStaff(data, weekday, today);
+  const { names: tonightNames } = tonightStaff(data, weekday, today, mikveh.publicNameOverride);
   const todayDippers = data.dippersLog.filter((d) => d.date === today).length;
   const openTickets = data.malfunctions.filter((m) => m.status !== "טופל").length;
   const lowStock = Object.values(data.inventory).filter((i) => i.qty <= i.threshold).length;
@@ -3531,8 +3587,16 @@ function ManualLoadPicker({ load, onManualLoad }) {
   );
 }
 
-function tonightStaff(data, weekday, today) {
+function tonightStaff(data, weekday, today, nameOverride) {
   if (!data || !data.defaultSchedule) return { shifts: [], names: [], isActual: false };
+
+  // דריסה ידנית של שם הבלנית המוצג (מוגדרת בטאבלט הבלנית) — עדיפות עליונה
+  // על פני הכל, למקרה שהמערכת לא משקפת נכון מי בפועל נמצאת במקווה.
+  if (nameOverride && nameOverride.trim()) {
+    const shift = { name: nameOverride.trim(), start: "", end: "", isActual: true, manual: true };
+    return { shifts: [shift], names: [shift.name], isActual: true };
+  }
+
   const todayRec = data.checklist[today];
   const shiftClosed = !!(todayRec && todayRec.closed);
 
@@ -3569,7 +3633,7 @@ function PublicMikvehDetail({ mikveh }) {
   const isOpenDay = todaysHours !== "סגור";
   const [expanded, setExpanded] = useState(false);
 
-  const { shifts: tonightShifts, names: tonightNames } = tonightStaff(data, weekday, today);
+  const { shifts: tonightShifts, names: tonightNames } = tonightStaff(data, weekday, today, mikveh.publicNameOverride);
   const load = estimateLoad(data.dippersLog, mikveh, today, mikveh.manualLoad);
   const todayRec = data.checklist[today];
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
