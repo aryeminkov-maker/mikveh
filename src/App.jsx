@@ -3,7 +3,8 @@ import { storage } from "./storage";
 import { signInWithGoogle, signOutUser, subscribeAuth, ensureAnonymousAuth } from "./auth";
 import { getZmanim, getSpecialDayInfo, formatHM } from "./zmanim";
 import { addToHomeScreen, isMobileDevice, isRunningStandalone } from "./pwa";
-import { uploadMalfunctionPhoto } from "./storageFiles";
+import { uploadMalfunctionPhoto, loadMalfunctionPhoto, deleteMalfunctionPhoto } from "./storageFiles";
+import { translateToEnglish } from "./translate";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend
@@ -16,7 +17,7 @@ import {
   Thermometer, TrendingUp, Download, RefreshCw, Building2, ShieldCheck,
   Link2, Copy, Tablet, Smartphone, Settings, Trash2, KeyRound, Loader2, Navigation,
   Bell, Info, Bath, Timer, Gift, Clock3,
-  Image, ImagePlus, ArrowRight, MessageSquare
+  Image, ImagePlus, ArrowRight, MessageSquare, Globe, ArrowUpCircle, Sparkles
 } from "lucide-react";
 
 /* ============================================================
@@ -195,6 +196,21 @@ function resolveDayHours(dayConfig, date) {
 }
 
 const ZMAN_ANCHOR_LABELS = { sunset: "שקיעה", tzeit: "צאת הכוכבים" };
+
+// בודק אם השעה הנוכחית נמצאת בתוך טווח שעות בפורמט "HH:MM–HH:MM" (תומך
+// בטווח שחוצה חצות, כמו "20:00–00:30"). אם המחרוזת אינה בפורמט הזה (למשל
+// טקסט הלכתי כמו "צאת השבת–00:00", "סגור", או "לא הוגדר") — מחזיר true
+// כברירת מחדל בטוחה, כדי לא לשבור תצוגה קיימת שהמנהל לא יכול להגדיר במדויק.
+function isNowWithinHours(hoursStr) {
+  const m = /^(\d{1,2}):(\d{2})\s*[–-]\s*(\d{1,2}):(\d{2})$/.exec((hoursStr || "").trim());
+  if (!m) return true;
+  const [, sh, sm, eh, em] = m.map(Number);
+  const startMin = sh * 60 + sm, endMin = eh * 60 + em;
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  if (endMin <= startMin) return nowMin >= startMin || nowMin < endMin; // crosses midnight
+  return nowMin >= startMin && nowMin < endMin;
+}
 
 // הופך מספר דקות לניסוח עברי טבעי עם קידומת "כ" (משמעה "בקירוב") — למשל
 // "כחצי שעה", "כשעתיים", ולמספרים לא עגולים "כ-X דקות".
@@ -421,7 +437,7 @@ export default function MikvehSystem() {
     );
   }
 
-  const topRoute = route === "public" ? "public" : route === "admin" ? "admin" : "kiosk";
+  const topRoute = route === "public" ? "public" : route === "admin" ? "admin" : route === "maintenance" ? "maintenance" : "kiosk";
 
   return (
     <div dir="rtl" style={{ background: COLORS.seafoam, minHeight: "100%", width: "100%", overflowX: "hidden", fontFamily: "'Assistant', sans-serif", color: COLORS.ink, boxSizing: "border-box" }}>
@@ -429,6 +445,7 @@ export default function MikvehSystem() {
       <TopBar route={topRoute} navigate={navigate} />
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 16px 48px" }}>
         {topRoute === "kiosk" && <KioskApp mikvehs={mikvehs.list} mikvehsCtl={mikvehs} />}
+        {topRoute === "maintenance" && <MaintenanceApp mikvehs={mikvehs.list} />}
         {topRoute === "admin" && <AdminApp mikvehsCtl={mikvehs} />}
         {topRoute === "public" && <PublicApp mikvehs={mikvehs.list} loaded={mikvehs.loaded} />}
       </div>
@@ -487,6 +504,7 @@ function InstallAppButton() {
 function TopBar({ route, navigate }) {
   const tabs = [
     { id: "kiosk", label: "התחברות לבלניות", icon: Droplets },
+    { id: "maintenance", label: "איש אחזקה", icon: Wrench },
     { id: "admin", label: "ניהול ובקרה", icon: ClipboardList },
   ];
   const [menuOpen, setMenuOpen] = useState(false);
@@ -605,6 +623,8 @@ function useSystemData(mikvehId) {
   const [appointments, setAppointments] = useShared(k("appointments"), []);
   const [defaultSchedule, setDefaultSchedule] = useShared(k("default-schedule"), {});
   const [feedback, setFeedback] = useShared(k("feedback"), []);
+  const [waterChangeLog, setWaterChangeLog] = useShared(k("water-change-log"), []);
+  const [cleaningLog, setCleaningLog] = useShared(k("cleaning-log"), []);
 
   const addAudit = useCallback((staffName, action, details) => {
     setAuditLog((prev) => [{ id: uid(), ts: new Date().toISOString(), staffName, action, details }, ...prev].slice(0, 500));
@@ -623,6 +643,8 @@ function useSystemData(mikvehId) {
     appointments, setAppointments,
     defaultSchedule, setDefaultSchedule,
     feedback, setFeedback,
+    waterChangeLog, setWaterChangeLog,
+    cleaningLog, setCleaningLog,
   };
 }
 
@@ -734,11 +756,28 @@ function KioskApp({ mikvehs, mikvehsCtl }) {
     onLeaveDevice={() => signOutUser()} />;
 }
 
+// אנימציית "טיפה מתמלאת" — טעינה שמתאימה לנושא מקווה, במקום עיגול מסתובב
+// גנרי. אנימציית SVG טהורה (SMIL), בלי תמונות/גופנים נוספים להוריד, כך
+// שאינה מאריכה את זמן הטעינה בפועל.
+function FillingDrop({ size = 40, color = COLORS.aqua }) {
+  const dropPath = "M12 2C12 2 5 11 5 15.5C5 19.09 8.13 22 12 22C15.87 22 19 19.09 19 15.5C19 11 12 2 12 2Z";
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" style={{ display: "block" }}>
+      <defs><clipPath id="dropClip"><path d={dropPath} /></clipPath></defs>
+      <path d={dropPath} fill="none" stroke={color} strokeOpacity="0.3" strokeWidth="1.3" />
+      <g clipPath="url(#dropClip)">
+        <rect x="0" y="22" width="24" height="24" fill={color}>
+          <animate attributeName="y" values="24;8;24" dur="1.8s" repeatCount="indefinite" calcMode="spline" keySplines="0.4 0 0.2 1; 0.4 0 0.2 1" />
+        </rect>
+      </g>
+    </svg>
+  );
+}
+
 function CenteredLoading({ text }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "80px 0", gap: 10, color: COLORS.teal }}>
-      <Loader2 size={26} className="spin" style={{ animation: "spin 1s linear infinite" }} />
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <FillingDrop size={30} color={COLORS.teal} />
       <span style={{ fontSize: 14 }}>{text}</span>
     </div>
   );
@@ -1228,8 +1267,11 @@ function PublicPreviewPanel({ data, mikveh }) {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const load = useMemo(() => estimateLoad(data.dippersLog, mikveh, today, mikveh.manualLoad), [data.dippersLog, mikveh, today, tick]);
+  const { config: dayConfig } = getEffectiveDayConfig(mikveh, new Date());
+  const todaysHours = resolveDayHours(dayConfig, new Date());
+  const suppressActual = mikveh.publicStatusMode === "scheduled" && !isNowWithinHours(todaysHours);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const { shifts } = useMemo(() => tonightStaff(data, weekday, today, mikveh.publicNameOverride), [data, weekday, today, tick]);
+  const { shifts } = useMemo(() => tonightStaff(data, weekday, today, mikveh.publicNameOverride, suppressActual), [data, weekday, today, tick, suppressActual]);
   const displayedName = shifts[0]?.name || "—";
 
   const startEdit = () => { setNameInput(mikveh.publicNameOverride || displayedName === "—" ? "" : displayedName); setEditingName(true); };
@@ -1245,12 +1287,17 @@ function PublicPreviewPanel({ data, mikveh }) {
         </button>
       </div>
       <div style={{ marginBottom: 10 }}>
-        <LoadBadge load={load} inline />
+        {suppressActual ? (
+          <span style={{ fontSize: 12, color: "#EAF3F1", opacity: 0.85 }}>מחוץ לשעות הפתיחה המוגדרות — הרמזור לא מוצג כרגע לציבור</span>
+        ) : (
+          <LoadBadge load={load} inline />
+        )}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span style={{ color: "#EAF3F1", fontSize: 13.5 }}>
           בלנית מוצגת: <b style={{ color: "#fff" }}>{displayedName}</b>
           {mikveh.publicNameOverride && <span style={{ fontSize: 11, color: COLORS.gold }}> (שונה ידנית)</span>}
+          {suppressActual && !mikveh.publicNameOverride && <span style={{ fontSize: 11, color: COLORS.gold }}> (שיבוץ עקרוני — לא כניסה בפועל, כי המקווה מוגדר להציג רק בתוך שעות הפתיחה)</span>}
         </span>
         {!editingName ? (
           <button onClick={startEdit} style={{ ...btnGhost, color: "#fff", borderColor: "#ffffff44", fontSize: 12, padding: "5px 10px" }}>שינוי שם</button>
@@ -1825,9 +1872,36 @@ const MALFUNCTION_TYPES = [
   "אחר",
 ];
 
+// תמונה מצורפת לקריאת תקלה: נטענת בעצלתיים מ-Firestore לפי המפתח (photoKey),
+// ובלחיצה נפתחת בגודל מלא. תומכת גם ב-photoUrl ישן (קישור חיצוני), אם קיים.
+function TicketPhoto({ photoKey, photoUrl, size = 48 }) {
+  const [src, setSrc] = useState(photoUrl || "");
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (photoKey && !photoUrl) loadMalfunctionPhoto(photoKey).then((d) => { if (alive && d) setSrc(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, [photoKey, photoUrl]);
+  if (!photoKey && !photoUrl) return null;
+  if (!src) return <div style={{ width: size, height: size, borderRadius: 8, background: "#00000008", flexShrink: 0 }} />;
+  return (
+    <>
+      <img src={src} alt="" onClick={() => setOpen(true)}
+        style={{ width: size, height: size, objectFit: "cover", borderRadius: 8, border: "1px solid #00000018", cursor: "zoom-in", flexShrink: 0 }} />
+      {open && (
+        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "#000000cc", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <img src={src} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 10 }} />
+        </div>
+      )}
+    </>
+  );
+}
+
 function KioskMalfunctions({ data, staffName, flash, mikvehId }) {
   const [desc, setDesc] = useState("");
   const [category, setCategory] = useState("");
+  const [waterChangeRequest, setWaterChangeRequest] = useState(false);
+  const [waterReason, setWaterReason] = useState("");
   const [editId, setEditId] = useState(null);
   const [editDesc, setEditDesc] = useState("");
   const [editCategory, setEditCategory] = useState("");
@@ -1846,21 +1920,30 @@ function KioskMalfunctions({ data, staffName, flash, mikvehId }) {
   const clearPhoto = () => { setPhotoFile(null); setPhotoPreview(""); };
 
   const submit = async () => {
-    if (!desc.trim() || !category) { flash("נא לבחור סוג ולתאר את הקריאה"); return; }
-    let photoUrl = "";
+    if (!category) { flash("נא לבחור סוג קריאה"); return; }
+    if (waterChangeRequest && !waterReason.trim()) { flash("נא למלא נימוק להחלפת המים"); return; }
+    if (!waterChangeRequest && !desc.trim()) { flash("נא לתאר את הקריאה"); return; }
+    let photoKey = "";
     if (photoFile) {
       setUploading(true);
       try {
-        photoUrl = await uploadMalfunctionPhoto(mikvehId, photoFile);
+        photoKey = await uploadMalfunctionPhoto(mikvehId, photoFile);
       } catch (e) {
         console.error("malfunction photo upload failed", e);
-        flash("העלאת התמונה נכשלה — הקריאה נשלחת בלי תמונה");
+        flash("העלאת התמונה נכשלה — הקריאה נשלחת בלי תמונה (" + (e?.message || "שגיאה") + ")");
       }
       setUploading(false);
     }
-    data.setMalfunctions((prev) => [{ id: uid(), date: todayStr(), staffName, category, description: desc.trim(), status: "פתוח", ts: new Date().toISOString(), photoUrl }, ...prev]);
-    data.addAudit(staffName, "פתיחת קריאת תקלה", `${category}: ${desc.trim().slice(0, 60)}`);
-    setDesc(""); setCategory(""); clearPhoto();
+    const entry = {
+      id: uid(), date: todayStr(), staffName, category,
+      description: waterChangeRequest ? "בקשה להחלפה חריגה של מים" : desc.trim(),
+      status: "פתוח", ts: new Date().toISOString(), photoKey,
+      ...(waterChangeRequest ? { waterChangeRequest: true, waterReason: waterReason.trim(), waterResolution: null } : {}),
+    };
+    data.setMalfunctions((prev) => [entry, ...prev]);
+    data.addAudit(staffName, waterChangeRequest ? "בקשה להחלפה חריגה של מים" : "פתיחת קריאת תקלה",
+      waterChangeRequest ? waterReason.trim().slice(0, 60) : `${category}: ${desc.trim().slice(0, 60)}`);
+    setDesc(""); setCategory(""); setWaterChangeRequest(false); setWaterReason(""); clearPhoto();
     flash("הקריאה נשלחה ✓");
   };
 
@@ -1872,6 +1955,8 @@ function KioskMalfunctions({ data, staffName, flash, mikvehId }) {
     flash("עודכן ✓");
   };
   const deleteEntry = (id) => {
+    const doomed = data.malfunctions.find((m) => m.id === id);
+    if (doomed?.photoKey) deleteMalfunctionPhoto(doomed.photoKey);
     data.setMalfunctions((prev) => prev.filter((m) => m.id !== id));
     data.addAudit(staffName, "מחיקת קריאת תקלה", "");
     flash("נמחק ✓");
@@ -1880,8 +1965,7 @@ function KioskMalfunctions({ data, staffName, flash, mikvehId }) {
   const statusColor = { "פתוח": COLORS.red, "בטיפול": COLORS.gold, "טופל": COLORS.aqua };
 
   return (
-    <Card title="דיווח תקלות וקריאות שירות" icon={Wrench}
-      right={<button onClick={() => setShowFixInfo(true)} style={{ ...btnGhost, fontSize: 12.5, padding: "7px 12px" }}><Wrench size={13} /> תיקון תקלות</button>}>
+    <Card title="דיווח תקלות וקריאות שירות" icon={Wrench}>
       {showFixInfo && (
         <KioskModal onClose={() => setShowFixInfo(false)}>
           <Wrench size={26} color={COLORS.teal} style={{ marginBottom: 8 }} />
@@ -1899,14 +1983,32 @@ function KioskMalfunctions({ data, staffName, flash, mikvehId }) {
         <Field label="סוג קריאה">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
             {MALFUNCTION_TYPES.map((c) => (
-              <button key={c} onClick={() => setCategory(c)} style={{
+              <button key={c} onClick={() => { setCategory(c); if (c === "תיקון תקלות") setShowFixInfo(true); if (c !== "תחזוקה שוטפת וניקיון") setWaterChangeRequest(false); }} style={{
                 ...btnBase(category === c ? COLORS.teal : "#fff", category === c ? "#fff" : COLORS.ink),
                 fontSize: 13.5, padding: "9px 14px", border: `1.5px solid ${category === c ? COLORS.teal : "#00000018"}`,
-              }}>{c}</button>
+              }}>{c === "תיקון תקלות" && <Wrench size={13} />} {c}</button>
             ))}
           </div>
         </Field>
       </div>
+      {category === "תחזוקה שוטפת וניקיון" && (
+        <div style={{ marginBottom: 12, background: COLORS.aquaLight, borderRadius: 10, padding: 12 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13.5, fontWeight: 700, color: COLORS.teal }}>
+            <input type="checkbox" checked={waterChangeRequest} onChange={(e) => setWaterChangeRequest(e.target.checked)} />
+            <Droplets size={15} /> בקשה להחלפה חריגה של מים
+          </label>
+          {waterChangeRequest && (
+            <div style={{ marginTop: 10 }}>
+              <Field label="נימוק להחלפת המים">
+                <input value={waterReason} onChange={(e) => setWaterReason(e.target.value)} style={inputStyle} placeholder='לדוגמה: "מים עכורים / ריח חלור חזק"' />
+              </Field>
+              <p style={{ fontSize: 11.5, color: "#3a5250", marginTop: 6, marginBottom: 0 }}>
+                הבקשה תועבר לאיש האחזקה ותתועד בניהול. הוא יסמן אם המים הוחלפו או לא.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
       <div style={{ marginBottom: 12 }}>
         <Field label="תיאור">
           <input value={desc} onChange={(e) => setDesc(e.target.value)} style={inputStyle} placeholder="תארי את הבעיה בקצרה" />
@@ -1952,14 +2054,20 @@ function KioskMalfunctions({ data, staffName, flash, mikvehId }) {
                 </div>
               ) : (
                 <div style={{ padding: 11, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-                  {m.photoUrl && (
-                    <a href={m.photoUrl} target="_blank" rel="noreferrer" style={{ flexShrink: 0 }}>
-                      <img src={m.photoUrl} alt="" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8, border: "1px solid #00000018" }} />
-                    </a>
-                  )}
+                  <TicketPhoto photoKey={m.photoKey} photoUrl={m.photoUrl} size={44} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{m.category} — {m.description}</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>
+                      {m.waterChangeRequest && <Droplets size={13} color={COLORS.teal} style={{ verticalAlign: "-2px" }} />} {m.category} — {m.description}
+                    </div>
                     <div style={{ fontSize: 11.5, color: "#3a5250" }}>{m.staffName} · {fmtDate(m.date)}</div>
+                    {m.waterChangeRequest && (
+                      <div style={{ fontSize: 12, marginTop: 4 }}>
+                        <span style={{ color: "#3a5250" }}>נימוק: {m.waterReason}</span><br />
+                        {m.waterResolution === "replaced" && <span style={{ color: COLORS.teal, fontWeight: 700 }}>✓ המים הוחלפו</span>}
+                        {m.waterResolution === "not_replaced" && <span style={{ color: COLORS.red, fontWeight: 700 }}>✗ לא הוחלפו — {m.waterResolutionReason}</span>}
+                        {!m.waterResolution && <span style={{ color: COLORS.gold, fontWeight: 700 }}>ממתין להחלטת איש האחזקה</span>}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: statusColor[m.status] }}>{m.status}</span>
@@ -2018,6 +2126,274 @@ function Empty({ text }) {
 /* ============================================================
    ADMIN APP (department manager / treasury)
    ============================================================ */
+/* ============================================================
+   MAINTENANCE APP (איש אחזקה) — receives routine maintenance/cleaning
+   requests from staff across all mikvehs, logs water changes, and can
+   escalate a ticket to the admin.
+   ============================================================ */
+function MaintenanceApp({ mikvehs }) {
+  const [maintenancePin] = useShared("maintenance-pin", "");
+  const [selectedId, setSelectedId] = useState("all"); // "all" או מזהה של מקווה בודד
+  const [authed, setAuthed] = useState(false);
+  const [name, setName] = useState("");
+  const [pinInput, setPinInput] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem("maintenance-session-name");
+    if (saved) { setName(saved); setAuthed(true); }
+  }, []);
+
+  const submit = () => {
+    if (!maintenancePin) { setError("לא הוגדר קוד כניסה — יש לפנות למנהל/ת המערכת"); return; }
+    if (pinInput !== maintenancePin) { setError("קוד שגוי"); return; }
+    if (!name.trim()) { setError("נא להזין שם"); return; }
+    sessionStorage.setItem("maintenance-session-name", name.trim());
+    setAuthed(true);
+  };
+
+  const logout = () => {
+    sessionStorage.removeItem("maintenance-session-name");
+    setAuthed(false); setName(""); setPinInput("");
+  };
+
+  if (!authed) {
+    return (
+      <div style={{ display: "flex", justifyContent: "center", paddingTop: 40 }}>
+        <div style={{ width: "100%", maxWidth: 380, textAlign: "center" }}>
+          <Wrench size={30} color={COLORS.teal} style={{ marginBottom: 10 }} />
+          <h2 className="font-display" style={{ marginBottom: 6 }}>כניסת איש אחזקה</h2>
+          <p style={{ fontSize: 13, color: "#7a8f8d", marginBottom: 20 }}>קבלת פניות תחזוקה וניקיון מכל המקוואות, ועדכון החלפות מים.</p>
+          <div style={{ textAlign: "right", marginBottom: 12 }}>
+            <Field label="שם"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          </div>
+          <div style={{ textAlign: "right", marginBottom: 16 }}>
+            <Field label="קוד כניסה (4 ספרות)">
+              <input style={{ ...inputStyle, textAlign: "center", letterSpacing: 6, fontSize: 20 }} maxLength={4} inputMode="numeric"
+                value={pinInput} onChange={(e) => { setPinInput(e.target.value.replace(/\D/g, "").slice(0, 4)); setError(""); }} />
+            </Field>
+          </div>
+          {error && <p style={{ color: COLORS.red, fontSize: 13, marginBottom: 12 }}>{error}</p>}
+          <button style={{ ...btnPrimary, width: "100%", justifyContent: "center" }} onClick={submit}>כניסה</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <h2 className="font-display" style={{ margin: 0 }}>שלום, {name}</h2>
+          <p style={{ margin: "2px 0 0", fontSize: 12.5, color: "#7a8f8d" }}>פניות תחזוקה וניקיון מכל המקוואות</p>
+        </div>
+        <button style={btnGhost} onClick={logout}><LogOut size={14} /> יציאה</button>
+      </div>
+      {mikvehs.length > 1 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+          {[{ id: "all", name: "כל המקוואות" }, ...mikvehs].map((m) => (
+            <button key={m.id} onClick={() => setSelectedId(m.id)} style={{
+              ...btnBase(selectedId === m.id ? COLORS.teal : "#fff", selectedId === m.id ? "#fff" : COLORS.ink),
+              fontSize: 13.5, padding: "8px 14px", border: `1.5px solid ${selectedId === m.id ? COLORS.teal : "#00000018"}`,
+            }}>{m.name}</button>
+          ))}
+        </div>
+      )}
+      {mikvehs.length === 0
+        ? <Empty text="אין כרגע מקוואות פעילים במערכת." />
+        : mikvehs.filter((m) => selectedId === "all" || m.id === selectedId)
+            .map((m) => <MaintenanceMikvehCard key={m.id} mikveh={m} staffName={name} />)}
+    </div>
+  );
+}
+
+function MaintenanceMikvehCard({ mikveh, staffName }) {
+  const data = useSystemData(mikveh.id);
+  const [translated, setTranslated] = useState({}); // ticket id -> translated text | "loading" | "error"
+  const [showWaterForm, setShowWaterForm] = useState(false);
+  const [waterNote, setWaterNote] = useState("");
+  const [toast, setToast] = useState("");
+
+  const openTickets = data.malfunctions.filter((t) => t.status !== "טופל");
+  const recentWater = (data.waterChangeLog || [])[0];
+  const recentCleaning = (data.cleaningLog || [])[0];
+  const [showCleanForm, setShowCleanForm] = useState(false);
+  const [cleanAreas, setCleanAreas] = useState([]);
+  const [cleanNote, setCleanNote] = useState("");
+  const CLEAN_AREAS = ["חדרי טבילה", "חדרי הכנה", "מקלחות", "שירותים", "כניסה ומסדרונות", "שטח חיצוני"];
+  const toggleArea = (a) => setCleanAreas((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
+  const logCleaning = () => {
+    if (cleanAreas.length === 0 && !cleanNote.trim()) { flash("נא לסמן אזור או לכתוב הערה"); return; }
+    const entry = { id: uid(), date: todayStr(), ts: new Date().toISOString(), staffName, areas: cleanAreas, note: cleanNote.trim() };
+    data.setCleaningLog((prev) => [entry, ...prev].slice(0, 300));
+    data.addAudit(staffName, "עדכון ניקיון שוטף", [cleanAreas.join(", "), cleanNote.trim()].filter(Boolean).join(" — "));
+    setCleanAreas([]); setCleanNote(""); setShowCleanForm(false);
+    flash("עדכון הניקיון נרשם ✓");
+  };
+
+  const flash = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
+
+  const setStatus = (id, status) => {
+    data.setMalfunctions((prev) => prev.map((t) => (t.id === id ? { ...t, status } : t)));
+    data.addAudit(staffName, "עדכון קריאת תחזוקה", status);
+    flash("עודכן ✓");
+  };
+
+  const escalate = (id) => {
+    data.setMalfunctions((prev) => prev.map((t) => (t.id === id ? { ...t, escalated: true, escalatedAt: new Date().toISOString(), escalatedBy: staffName } : t)));
+    data.addAudit(staffName, "העברת קריאה למנהל/ת", "");
+    flash("הועבר למנהל/ת ✓");
+  };
+
+  const translate = async (ticket) => {
+    setTranslated((prev) => ({ ...prev, [ticket.id]: "loading" }));
+    try {
+      const t = await translateToEnglish(ticket.description);
+      setTranslated((prev) => ({ ...prev, [ticket.id]: t }));
+    } catch (e) {
+      setTranslated((prev) => ({ ...prev, [ticket.id]: "error" }));
+    }
+  };
+
+  const logWaterChange = () => {
+    const entry = { id: uid(), date: todayStr(), ts: new Date().toISOString(), staffName, note: waterNote.trim() };
+    data.setWaterChangeLog((prev) => [entry, ...prev].slice(0, 200));
+    data.addAudit(staffName, "עדכון החלפת מים", waterNote.trim());
+    setWaterNote(""); setShowWaterForm(false);
+    flash("החלפת המים נרשמה ✓");
+  };
+
+  const [resolvingId, setResolvingId] = useState(null); // ticket id currently showing the "not replaced" reason box
+  const [resolveReason, setResolveReason] = useState("");
+
+  const resolveWaterRequest = (ticket, replaced, reason) => {
+    data.setMalfunctions((prev) => prev.map((t) => (t.id === ticket.id
+      ? { ...t, waterResolution: replaced ? "replaced" : "not_replaced", waterResolutionReason: replaced ? "" : reason, waterResolvedBy: staffName, waterResolvedAt: new Date().toISOString(), status: "טופל" }
+      : t)));
+    data.addAudit(staffName, "מענה לבקשת החלפת מים", replaced ? "המים הוחלפו" : `לא הוחלפו — ${reason}`);
+    if (replaced) {
+      data.setWaterChangeLog((prev) => [{ id: uid(), date: todayStr(), ts: new Date().toISOString(), staffName, note: `בהמשך לבקשה: ${ticket.waterReason}` }, ...prev].slice(0, 200));
+    }
+    setResolvingId(null); setResolveReason("");
+    flash(replaced ? "סומן שהמים הוחלפו ✓" : "סומן שלא הוחלפו ✓");
+  };
+
+  return (
+    <Card title={mikveh.name} icon={Building2}
+      right={
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button onClick={() => { setShowCleanForm((x) => !x); setShowWaterForm(false); }} style={{ ...btnGhost, fontSize: 12.5, padding: "7px 12px" }}><Sparkles size={13} /> עדכון ניקיון</button>
+          <button onClick={() => { setShowWaterForm((x) => !x); setShowCleanForm(false); }} style={{ ...btnGhost, fontSize: 12.5, padding: "7px 12px" }}><Droplets size={13} /> עדכון החלפת מים</button>
+        </div>
+      }>
+      {toast && <div style={{ background: COLORS.aquaLight, color: COLORS.teal, borderRadius: 8, padding: "7px 12px", fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{toast}</div>}
+
+      {showWaterForm && (
+        <div style={{ background: COLORS.seafoam, borderRadius: 10, padding: 12, marginBottom: 14 }}>
+          <Field label="הערה (אופציונלי)">
+            <input style={inputStyle} value={waterNote} onChange={(e) => setWaterNote(e.target.value)} placeholder='לדוגמה: "החלפה מלאה, כלור נבדק"' />
+          </Field>
+          <button style={{ ...btnPrimary, marginTop: 8 }} onClick={logWaterChange}><Check size={15} /> שמירת עדכון</button>
+        </div>
+      )}
+
+      {showCleanForm && (
+        <div style={{ background: COLORS.seafoam, borderRadius: 10, padding: 12, marginBottom: 14 }}>
+          <Field label="אזורים שנוקו">
+            <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 4 }}>
+              {CLEAN_AREAS.map((a) => (
+                <button key={a} onClick={() => toggleArea(a)} style={{
+                  ...btnBase(cleanAreas.includes(a) ? COLORS.teal : "#fff", cleanAreas.includes(a) ? "#fff" : COLORS.ink),
+                  fontSize: 12.5, padding: "7px 12px", border: `1.5px solid ${cleanAreas.includes(a) ? COLORS.teal : "#00000018"}`,
+                }}>{a}</button>
+              ))}
+            </div>
+          </Field>
+          <div style={{ marginTop: 10 }}>
+            <Field label="הערה (אופציונלי)">
+              <input style={inputStyle} value={cleanNote} onChange={(e) => setCleanNote(e.target.value)} placeholder='לדוגמה: "ניקיון יסודי, הוחלפו חומרי ניקוי"' />
+            </Field>
+          </div>
+          <button style={{ ...btnPrimary, marginTop: 8 }} onClick={logCleaning}><Check size={15} /> שמירת עדכון</button>
+        </div>
+      )}
+
+      {(recentWater || recentCleaning) && (
+        <div style={{ fontSize: 11.5, color: "#7a8f8d", marginBottom: 12, display: "flex", flexDirection: "column", gap: 2 }}>
+          {recentWater && <span>💧 החלפת מים אחרונה: {fmtDate(recentWater.date)} ({recentWater.staffName}){recentWater.note ? ` — ${recentWater.note}` : ""}</span>}
+          {recentCleaning && <span>✨ ניקיון אחרון: {fmtDate(recentCleaning.date)} ({recentCleaning.staffName}){recentCleaning.areas?.length ? ` — ${recentCleaning.areas.join(", ")}` : ""}{recentCleaning.note ? ` · ${recentCleaning.note}` : ""}</span>}
+        </div>
+      )}
+
+      {openTickets.length === 0 ? (
+        <Empty text="אין קריאות פתוחות במקווה הזה." />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {openTickets.map((t) => (
+            <div key={t.id} style={{ border: "1px solid #00000012", borderRadius: 11, padding: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <TicketPhoto photoKey={t.photoKey} photoUrl={t.photoUrl} size={48} />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{t.category} — {t.description}</div>
+                    <div style={{ fontSize: 11.5, color: "#3a5250" }}>
+                      {t.staffName} · {fmtDate(t.date)}
+                      {t.escalated && <span style={{ color: COLORS.red, fontWeight: 700 }}> · 🔺 הועבר למנהל/ת</span>}
+                    </div>
+                    {translated[t.id] === "loading" && <div style={{ fontSize: 12, color: "#7a8f8d", marginTop: 4 }}>מתרגמת…</div>}
+                    {translated[t.id] === "error" && <div style={{ fontSize: 12, color: COLORS.red, marginTop: 4 }}>התרגום נכשל — נסה שוב</div>}
+                    {translated[t.id] && translated[t.id] !== "loading" && translated[t.id] !== "error" && (
+                      <div style={{ fontSize: 12.5, color: COLORS.teal, marginTop: 4, direction: "ltr", textAlign: "left" }}>{translated[t.id]}</div>
+                    )}
+                  </div>
+                </div>
+                <select value={t.status} onChange={(e) => setStatus(t.id, e.target.value)} style={{ ...inputStyle, width: 120, padding: "6px 9px", fontSize: 12.5 }}>
+                  {["פתוח", "בטיפול", "טופל"].map((s) => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <button onClick={() => translate(t)} style={{ ...btnGhost, fontSize: 11.5, padding: "5px 10px" }}><Globe size={12} /> תרגום לאנגלית</button>
+                {!t.escalated && (
+                  <button onClick={() => escalate(t.id)} style={{ ...btnGhost, fontSize: 11.5, padding: "5px 10px", color: COLORS.red, borderColor: COLORS.red + "55" }}>
+                    <ArrowUpCircle size={12} /> העברה למנהל/ת
+                  </button>
+                )}
+              </div>
+
+              {t.waterChangeRequest && (
+                <div style={{ marginTop: 10, background: COLORS.aquaLight, borderRadius: 10, padding: 10 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.teal, marginBottom: 4 }}>💧 בקשה להחלפה חריגה של מים</div>
+                  <div style={{ fontSize: 12.5, color: "#3a5250", marginBottom: 8 }}>נימוק: {t.waterReason}</div>
+                  {t.waterResolution === "replaced" && <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.teal }}>✓ המים הוחלפו ({t.waterResolvedBy}, {fmtDateTime(t.waterResolvedAt)})</div>}
+                  {t.waterResolution === "not_replaced" && <div style={{ fontSize: 13, fontWeight: 700, color: COLORS.red }}>✗ לא הוחלפו — {t.waterResolutionReason} ({t.waterResolvedBy}, {fmtDateTime(t.waterResolvedAt)})</div>}
+                  {!t.waterResolution && (
+                    resolvingId === t.id ? (
+                      <div>
+                        <Field label="נימוק לאי-החלפה">
+                          <input style={inputStyle} value={resolveReason} onChange={(e) => setResolveReason(e.target.value)} placeholder='לדוגמה: "בוצעה החלפה השבוע, אין צורך"' />
+                        </Field>
+                        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                          <button style={btnPrimary} onClick={() => resolveReason.trim() ? resolveWaterRequest(t, false, resolveReason.trim()) : flash("נא למלא נימוק")}><Check size={14} /> אישור</button>
+                          <button style={btnGhost} onClick={() => { setResolvingId(null); setResolveReason(""); }}>ביטול</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => resolveWaterRequest(t, true)} style={{ ...btnPrimary, fontSize: 12.5, padding: "6px 12px" }}><Check size={13} /> המים הוחלפו</button>
+                        <button onClick={() => setResolvingId(t.id)} style={{ ...btnGhost, fontSize: 12.5, padding: "6px 12px", color: COLORS.red, borderColor: COLORS.red + "55" }}><X size={13} /> לא הוחלפו</button>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function AdminApp({ mikvehsCtl }) {
   const [authUser, authLoading] = useAuthUser();
   const [adminEmails, setAdminEmails, adminEmailsLoaded] = useShared("admin-emails", []);
@@ -2211,6 +2587,17 @@ function AdminDashboard({ data }) {
         </Card>
       )}
 
+      {((data.waterChangeLog || []).length > 0 || (data.cleaningLog || []).length > 0) && (
+        <Card title="יומן אחזקה (החלפות מים וניקיון)" icon={Droplets}>
+          <Table headers={["תאריך", "סוג", "פרטים", "מי"]}
+            rows={[
+              ...(data.waterChangeLog || []).map((e) => ({ ts: e.ts, row: [fmtDate(e.date), "💧 החלפת מים", e.note || "—", e.staffName] })),
+              ...(data.cleaningLog || []).map((e) => ({ ts: e.ts, row: [fmtDate(e.date), "✨ ניקיון", [(e.areas || []).join(", "), e.note].filter(Boolean).join(" · ") || "—", e.staffName] })),
+            ].sort((a, b) => (b.ts || "").localeCompare(a.ts || "")).slice(0, 15).map((x) => x.row)}
+            empty="" />
+        </Card>
+      )}
+
       {unresolvedNotes.length > 0 && (
         <Card title="פתקים פתוחים" icon={StickyNote}>
           <Table headers={["פתק", "מתי"]} rows={unresolvedNotes.slice(0, 8).map((n) => [n.text || "—", fmtDateTime(n.createdAt || n.ts)])} empty="" />
@@ -2241,6 +2628,16 @@ function AdminPermissions({ adminEmails, setAdminEmails, mikvehs, authUser }) {
   const [guestEmail, setGuestEmail] = useState("");
   const [guestStaffId, setGuestStaffId] = useState("");
   const [guestMikvehId, setGuestMikvehId] = useState(mikvehs[0]?.id || "");
+  const [maintenancePin, setMaintenancePin] = useShared("maintenance-pin", "");
+  const [pinInput, setPinInput] = useState("");
+  const [pinSaved, setPinSaved] = useState(false);
+  const savePin = () => {
+    const clean = pinInput.replace(/\D/g, "").slice(0, 4);
+    if (clean.length !== 4) return;
+    setMaintenancePin(clean);
+    setPinSaved(true);
+    setTimeout(() => setPinSaved(false), 2500);
+  };
 
   const addAdmin = () => {
     const email = newAdminEmail.trim().toLowerCase();
@@ -2335,6 +2732,24 @@ function AdminPermissions({ adminEmails, setAdminEmails, mikvehs, authUser }) {
           ])} empty="אין עדיין הרשאות נוספות." />
         </div>
       </Card>
+
+      <Card title="קוד כניסה לאיש אחזקה" icon={Wrench}>
+        <p style={{ fontSize: 12.5, color: "#7a8f8d", marginTop: 0 }}>
+          קוד משותף (4 ספרות) לכניסה לממשק "איש אחזקה" — נפרד מהקודים האישיים של הבלניות.
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, color: "#3a5250" }}>
+            {maintenancePin ? <>הקוד הנוכחי: <b style={{ letterSpacing: 3 }}>{maintenancePin}</b></> : "לא הוגדר קוד עדיין"}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+          <input value={pinInput} onChange={(e) => setPinInput(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            maxLength={4} inputMode="numeric" placeholder="קוד חדש (4 ספרות)"
+            style={{ ...inputStyle, width: 160, textAlign: "center", letterSpacing: 4 }} />
+          <button style={btnPrimary} onClick={savePin} disabled={pinInput.length !== 4}><Check size={15} /> שמירה</button>
+          {pinSaved && <span style={{ fontSize: 12.5, color: COLORS.teal, fontWeight: 700 }}>נשמר ✓</span>}
+        </div>
+      </Card>
     </>
   );
 }
@@ -2419,7 +2834,7 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
 
   // ── All state at top level ──────────────────────────────────────────────────
-  const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, bathRooms: mikveh.bathRooms ?? 2, showerRooms: mikveh.showerRooms ?? 1, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "", feedbackUrl: mikveh.feedbackUrl || "" });
+  const [form, setForm] = useState({ name: mikveh.name, address: mikveh.address || "", phone: mikveh.phone || "", notes: mikveh.notes || "", photoUrl: mikveh.photoUrl || "", pinnedNote: mikveh.pinnedNote || "", roomsCount: mikveh.roomsCount ?? 3, bathRooms: mikveh.bathRooms ?? 2, showerRooms: mikveh.showerRooms ?? 1, price: mikveh.price ?? "25", paymentUrl: mikveh.paymentUrl || "", feedbackUrl: mikveh.feedbackUrl || "", publicStatusMode: mikveh.publicStatusMode || "immediate" });
   const [newPhotoUrl, setNewPhotoUrl] = useState("");
   const [newAmenity, setNewAmenity] = useState("");
   const [copied, setCopied] = useState(false);
@@ -2663,6 +3078,17 @@ function MikvehRow({ mikveh, mikvehsCtl }) {
           </SectionToggle>
 
           <SectionToggle title="הגדרות טכניות" icon={Settings}>
+            <div style={{ background: COLORS.seafoam, borderRadius: 10, padding: 10, marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 7 }}>מתי להציג לציבור שהמקווה פתוח ומי הבלנית?</div>
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 7, marginBottom: 7, cursor: "pointer", fontSize: 12.5 }}>
+                <input type="radio" name={`statusMode-${mikveh.id}`} checked={form.publicStatusMode !== "scheduled"} onChange={() => setForm({ ...form, publicStatusMode: "immediate" })} style={{ marginTop: 3 }} />
+                <span>מיד עם כניסת הבלנית למערכת — גם אם זה לפני/אחרי שעות הפתיחה המוגדרות</span>
+              </label>
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 7, cursor: "pointer", fontSize: 12.5 }}>
+                <input type="radio" name={`statusMode-${mikveh.id}`} checked={form.publicStatusMode === "scheduled"} onChange={() => setForm({ ...form, publicStatusMode: "scheduled" })} style={{ marginTop: 3 }} />
+                <span>רק בתוך טווח שעות הפתיחה המוגדרות להיום (גם אם הבלנית כבר נכנסה למערכת לפני כן)</span>
+              </label>
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 10, marginBottom: 12 }}>
               <Field label="חדרי אמבטיה (גם התארגנות)"><input type="number" min="0" style={inputStyle} value={form.bathRooms} onChange={(e) => setForm({ ...form, bathRooms: Math.max(0, parseInt(e.target.value) || 0) })} /></Field>
               <Field label="חדרי מקלחת (טבילה בלבד)"><input type="number" min="0" style={inputStyle} value={form.showerRooms} onChange={(e) => setForm({ ...form, showerRooms: Math.max(0, parseInt(e.target.value) || 0) })} /></Field>
@@ -3415,22 +3841,34 @@ function AdminAudit({ data }) {
 
 function AdminTickets({ data }) {
   const setStatus = (id, status) => data.setMalfunctions((prev) => prev.map((m) => m.id === id ? { ...m, status } : m));
+  // קריאות שהועברו ע"י איש האחזקה למנהל/ת מוצגות ראשונות, כדי שלא יפוספסו.
+  const sorted = [...data.malfunctions].sort((a, b) => (b.escalated ? 1 : 0) - (a.escalated ? 1 : 0));
   return (
     <>
       <Card title="קריאות תפעול מול המועצה" icon={Wrench}>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {data.malfunctions.length === 0 && <Empty text="אין קריאות תקלה." />}
-          {data.malfunctions.map((m) => (
-            <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 13, borderRadius: 11, border: "1px solid #00000012", flexWrap: "wrap", gap: 10 }}>
+          {sorted.length === 0 && <Empty text="אין קריאות תקלה." />}
+          {sorted.map((m) => (
+            <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 13, borderRadius: 11, border: m.escalated ? `1.5px solid ${COLORS.red}55` : "1px solid #00000012", background: m.escalated ? COLORS.redLight : "transparent", flexWrap: "wrap", gap: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {m.photoUrl && (
-                  <a href={m.photoUrl} target="_blank" rel="noreferrer" style={{ flexShrink: 0 }}>
-                    <img src={m.photoUrl} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, border: "1px solid #00000018" }} />
-                  </a>
-                )}
+                <TicketPhoto photoKey={m.photoKey} photoUrl={m.photoUrl} size={48} />
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{m.category} — {m.description}</div>
-                  <div style={{ fontSize: 12, color: "#3a5250" }}>{m.staffName} · {fmtDate(m.date)}</div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>
+                    {m.escalated && <span style={{ color: COLORS.red }}>🔺 </span>}
+                    {m.waterChangeRequest && <Droplets size={13} color={COLORS.teal} style={{ verticalAlign: "-2px" }} />} {m.category} — {m.description}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#3a5250" }}>
+                    {m.staffName} · {fmtDate(m.date)}
+                    {m.escalated && <> · הועבר ע"י {m.escalatedBy} ({fmtDateTime(m.escalatedAt)})</>}
+                  </div>
+                  {m.waterChangeRequest && (
+                    <div style={{ fontSize: 12, marginTop: 4 }}>
+                      <span style={{ color: "#3a5250" }}>נימוק: {m.waterReason}</span><br />
+                      {m.waterResolution === "replaced" && <span style={{ color: COLORS.teal, fontWeight: 700 }}>✓ המים הוחלפו ({m.waterResolvedBy})</span>}
+                      {m.waterResolution === "not_replaced" && <span style={{ color: COLORS.red, fontWeight: 700 }}>✗ לא הוחלפו — {m.waterResolutionReason} ({m.waterResolvedBy})</span>}
+                      {!m.waterResolution && <span style={{ color: COLORS.gold, fontWeight: 700 }}>ממתין להחלטת איש האחזקה</span>}
+                    </div>
+                  )}
                 </div>
               </div>
               <select value={m.status} onChange={(e) => setStatus(m.id, e.target.value)} style={{ ...inputStyle, width: 130, padding: "7px 10px" }}>
@@ -3476,7 +3914,7 @@ function PublicApp({ mikvehs, loaded }) {
   if (!loaded) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 300, gap: 16 }}>
-        <Droplets size={36} color={COLORS.aqua} style={{ animation: "spin 1.5s linear infinite" }} />
+        <FillingDrop size={40} color={COLORS.aqua} />
         <p style={{ fontSize: 16, color: COLORS.teal, fontWeight: 600, margin: 0 }}>טוען נתונים…</p>
       </div>
     );
@@ -3619,7 +4057,7 @@ function ManualLoadPicker({ load, onManualLoad }) {
   );
 }
 
-function tonightStaff(data, weekday, today, nameOverride) {
+function tonightStaff(data, weekday, today, nameOverride, suppressActual) {
   if (!data || !data.defaultSchedule) return { shifts: [], names: [], isActual: false };
 
   // דריסה ידנית של שם הבלנית המוצג (מוגדרת בטאבלט הבלנית) — עדיפות עליונה
@@ -3636,7 +4074,10 @@ function tonightStaff(data, weekday, today, nameOverride) {
   // bulanit who is actually logged in right now (the most recent login for
   // today), with no time range, even though the general schedule below has
   // time slots. loginLog is newest-first, so the first match is "now".
-  if (!shiftClosed) {
+  // suppressActual is set when the mikveh is configured to only reflect
+  // actual logins during the officially defined opening hours — outside
+  // that window we fall through to the scheduled display below instead.
+  if (!shiftClosed && !suppressActual) {
     const actualToday = data.loginLog.filter((l) => l.ts.slice(0, 10) === today);
     if (actualToday.length) {
       const shift = { name: actualToday[0].staffName, start: "", end: "", isActual: true };
@@ -3663,9 +4104,10 @@ function PublicMikvehDetail({ mikveh }) {
   const { config: dayConfig, holidayName } = getEffectiveDayConfig(mikveh, new Date());
   const todaysHours = resolveDayHours(dayConfig, new Date());
   const isOpenDay = todaysHours !== "סגור";
+  const suppressActual = mikveh.publicStatusMode === "scheduled" && !isNowWithinHours(todaysHours);
   const [expanded, setExpanded] = useState(false);
 
-  const { shifts: tonightShifts, names: tonightNames } = tonightStaff(data, weekday, today, mikveh.publicNameOverride);
+  const { shifts: tonightShifts, names: tonightNames } = tonightStaff(data, weekday, today, mikveh.publicNameOverride, suppressActual);
   const load = estimateLoad(data.dippersLog, mikveh, today, mikveh.manualLoad);
   const todayRec = data.checklist[today];
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mikveh.address || mikveh.name)}`;
@@ -3694,7 +4136,7 @@ function PublicMikvehDetail({ mikveh }) {
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
             <span style={{ width: 10, height: 10, borderRadius: "50%", background: isOpenDay ? "#8CE0B0" : "#EFA6A0" }} />
             <span style={{ fontWeight: 700, fontSize: 14 }}>{isOpenDay ? "פתוח היום" : "סגור היום"}</span>
-            {isOpenDay && todayRec?.opened && !todayRec?.closed && (
+            {isOpenDay && !suppressActual && todayRec?.opened && !todayRec?.closed && (
               <LoadBadge load={load} inline />
             )}
           </div>

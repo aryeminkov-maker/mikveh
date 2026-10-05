@@ -31,9 +31,11 @@
     <meta name="twitter:image" content="https://aryeminkov-maker.github.io/mikveh/social-preview.jpg" />
 
     <!-- חישוב זמנים הלכתיים (שקיעה / צאת הכוכבים) וזיהוי חגים בלוח העברי -->
-    <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/kosher-zmanim@0.9.0/dist/kosher-zmanim.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@hebcal/core@6/dist/bundle.min.js"></script>
+    <!-- defer: מוריד את שלושת הקבצים במקביל לשאר הדף בלי לחסום את הרינדור,
+         ומריץ אותם רק אחרי שה-HTML נטען — משפר משמעותית את מהירות הטעינה. -->
+    <script defer src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/kosher-zmanim@0.9.0/dist/kosher-zmanim.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@hebcal/core@6/dist/bundle.min.js"></script>
   </head>
   <body style="margin:0;">
     <div id="root"></div>
